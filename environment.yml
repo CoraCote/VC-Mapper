@@ -1,0 +1,13 @@
+name: vc-mapper
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - streamlit
+  - pandas
+  - geopandas
+  - openpyxl
+  - shapely
+  - fiona
+  - folium
+  - pydeck 
