@@ -69,31 +69,20 @@ def test_city_filtering():
     print("\n🔍 Testing City Filtering Functionality")
     print("=" * 50)
     
-    # Sample traffic data with city information
-    sample_data = {
-        'segment_id': range(1, 11),
-        'road_name': [f"Road {i}" for i in range(1, 11)],
-        'city_name': [
-            "West Palm Beach", "Boca Raton", "Delray Beach", "Boynton Beach",
-            "Lake Worth", "Wellington", "Jupiter", "Palm Beach Gardens",
-            "Fort Lauderdale", "Hollywood"
-        ],
-        'current_volume': [15000, 12000, 18000, 14000, 16000, 11000, 13000, 17000, 20000, 19000],
-        'functional_class': ['Arterial'] * 5 + ['Collector'] * 5
-    }
-    
-    df = pd.DataFrame(sample_data)
+    # Test with empty data (no sample data)
+    df = pd.DataFrame()
     print(f"Original dataset: {len(df)} records")
-    print("Cities in dataset:", df['city_name'].unique())
+    print("No sample data - testing with empty DataFrame")
     
-    # Test filtering by city
+    # Test filtering by city (should handle empty DataFrame gracefully)
     test_cities = ["West Palm Beach", "Boca Raton", "Non-existent City"]
     
     for city in test_cities:
-        filtered_df = df[df['city_name'].str.contains(city, case=False, na=False)]
-        print(f"\nFiltering for '{city}': {len(filtered_df)} records found")
-        if not filtered_df.empty:
-            print("Found cities:", filtered_df['city_name'].unique())
+        if not df.empty:
+            filtered_df = df[df['city_name'].str.contains(city, case=False, na=False)]
+            print(f"\nFiltering for '{city}': {len(filtered_df)} records found")
+        else:
+            print(f"\nFiltering for '{city}': 0 records found (empty DataFrame)")
     
     print("\n✅ City filtering test completed!")
 

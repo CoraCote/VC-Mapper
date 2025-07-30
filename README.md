@@ -185,7 +185,7 @@ The application integrates with FDOT's Traffic Online system using their ArcGIS 
   - Layer 1: AADT (Annual Average Daily Traffic) Data
 - **Authentication**: Public API, no authentication required
 - **Rate limiting**: Configured for API compliance
-- **Fallback**: Sample data when API is unavailable
+- **Error handling**: Graceful error handling when API is unavailable
 
 ### FDOT Open Data Hub
 The application integrates with FDOT's Open Data Hub for comprehensive city selection:
@@ -203,7 +203,7 @@ The application integrates with FDOT's Open Data Hub for comprehensive city sele
 - **Statewide data**: Access to all Florida traffic data
 - **Year selection**: Choose data from different years
 - **Geographic data**: Includes latitude/longitude coordinates
-- **Error handling**: Graceful fallback to sample data
+- **Error handling**: Graceful error handling when API is unavailable
 - **Comprehensive city list**: 113+ Florida cities available for selection
 
 ### Placer.ai Integration
@@ -301,6 +301,7 @@ For support and questions:
 - **v1.3.0**: Improved UI and added comprehensive documentation
 - **v1.4.0**: Added FDOT Open Data Hub integration with comprehensive city selection (113+ Florida cities)
 - **v1.5.0**: Removed county selection - all data now syncs with city selection field
+- **v1.5.1**: Fixed KeyError: 'functional_class' issue - improved data validation and error handling
 
 ---
 

@@ -156,7 +156,6 @@ LOGGING_CONFIG = {
 # Development settings
 DEV_CONFIG = {
     "debug_mode": os.getenv("DEBUG", "False").lower() == "true",
-    "sample_data_size": 50,
     "cache_timeout": 3600  # 1 hour
 }
 

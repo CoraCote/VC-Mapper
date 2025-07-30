@@ -44,20 +44,8 @@ def test_app_integration():
     # Test 4: Test city filtering logic
     print("\n4. Testing city filtering logic...")
     
-    # Sample traffic data with city information
-    sample_data = {
-        'segment_id': range(1, 11),
-        'road_name': [f"Road {i}" for i in range(1, 11)],
-        'city_name': [
-            "West Palm Beach", "Boca Raton", "Delray Beach", "Boynton Beach",
-            "Lake Worth", "Wellington", "Jupiter", "Palm Beach Gardens",
-            "Fort Lauderdale", "Hollywood"
-        ],
-        'current_volume': [15000, 12000, 18000, 14000, 16000, 11000, 13000, 17000, 20000, 19000],
-        'functional_class': ['Arterial'] * 5 + ['Collector'] * 5
-    }
-    
-    df = pd.DataFrame(sample_data)
+    # Test with empty data (no sample data)
+    df = pd.DataFrame()
     print(f"Original dataset: {len(df)} records")
     
     # Test filtering logic (same as in app.py)

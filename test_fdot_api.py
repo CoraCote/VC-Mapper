@@ -27,7 +27,7 @@ def test_fdot_api_integration():
         sites_df = api.get_traffic_monitoring_sites(county="Palm Beach")
         print(f"✅ Found {len(sites_df)} traffic monitoring sites")
         if not sites_df.empty:
-            print("Sample data:")
+            print("Data preview:")
             print(sites_df.head(3))
         
         # Test 2: AADT Data
@@ -36,7 +36,7 @@ def test_fdot_api_integration():
         aadt_df = api.get_aadt_data(county="Palm Beach", year=2023)
         print(f"✅ Found {len(aadt_df)} AADT records")
         if not aadt_df.empty:
-            print("Sample data:")
+            print("Data preview:")
             print(aadt_df.head(3))
         
         # Test 3: Comprehensive Traffic Data
@@ -45,7 +45,7 @@ def test_fdot_api_integration():
         traffic_df = api.get_traffic_data(county="Palm Beach", year=2023)
         print(f"✅ Found {len(traffic_df)} traffic records")
         if not traffic_df.empty:
-            print("Sample data:")
+            print("Data preview:")
             print(traffic_df.head(3))
             
             # Show data types and info

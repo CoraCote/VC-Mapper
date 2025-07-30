@@ -205,16 +205,16 @@ class FDOTTrafficAPI:
                         'aadt': 'current_volume'
                     })
             
-            # If still empty, return sample data for demonstration
+            # If still empty, return empty DataFrame
             if df.empty:
-                logger.warning("No real data available, returning sample data")
-                return self._get_sample_data(county, year)
+                logger.warning("No real data available from FDOT API")
+                return pd.DataFrame()
             
             return df
             
         except Exception as e:
             logger.error(f"Error fetching traffic data: {e}")
-            return self._get_sample_data(county, year)
+            return pd.DataFrame()
     
     def _clean_traffic_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -239,8 +239,11 @@ class FDOTTrafficAPI:
         # Remove negative volumes
         df = df[df['current_volume'] > 0]
         
-        # Fill missing functional_class with default
-        df['functional_class'] = df['functional_class'].fillna('Arterial')
+        # Ensure functional_class column exists and fill missing values
+        if 'functional_class' not in df.columns:
+            df['functional_class'] = 'Arterial'
+        else:
+            df['functional_class'] = df['functional_class'].fillna('Arterial')
         
         # Ensure segment_id exists
         if 'segment_id' not in df.columns:
@@ -248,30 +251,7 @@ class FDOTTrafficAPI:
         
         return df
     
-    def _get_sample_data(self, county: str, year: int) -> pd.DataFrame:
-        """
-        Generate sample data when API is unavailable
-        
-        Args:
-            county: County name
-            year: Year of data
-            
-        Returns:
-            DataFrame with sample data
-        """
-        logger.info(f"Generating sample data for {county} county, year {year}")
-        
-        sample_data = {
-            'segment_id': range(1, 21),
-            'road_name': [f"{county} Road {i}" for i in range(1, 21)],
-            'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
-            'current_volume': np.random.randint(5000, 25000, 20),
-            'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)],
-            'county': [county] * 20,
-            'year': [year] * 20
-        }
-        
-        return pd.DataFrame(sample_data)
+
 
 class CapacityCalculator:
     """
