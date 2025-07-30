@@ -105,7 +105,7 @@ This application is designed for mobility planning and transportation consulting
 
 1. **Open your web browser** and navigate to `http://localhost:8501`
 2. **Configure settings** in the sidebar:
-   - Select your target county
+   - Select your target city
    - Set growth rate and projection years
    - Choose data source (FDOT API or manual entry)
 3. **Test FDOT API** (optional): Click "Test FDOT API" to verify connection
@@ -145,12 +145,12 @@ VC-Mapper/
 
 ## 🔧 Configuration
 
-### County Settings
-The application supports multiple Florida counties:
-- **Palm Beach County** (default)
-- **Broward County**
-- **Miami-Dade County**
-- **Monroe County**
+### City Settings
+The application supports comprehensive city selection across Florida:
+- **113+ Florida Cities** available for selection
+- **County-based Organization** for easy navigation
+- **Dynamic Map Centering** based on selected city
+- **Smart Data Filtering** by city or statewide analysis
 
 ### Growth Projections
 - **Uniform growth rates**: Apply the same growth rate to all segments
@@ -199,8 +199,8 @@ The application integrates with FDOT's Open Data Hub for comprehensive city sele
 
 ### FDOT API Features
 - **Real-time data**: Live traffic volume data from FDOT
-- **County filtering**: Filter data by specific counties
-- **City filtering**: Filter data by specific cities within counties
+- **City filtering**: Filter data by specific cities
+- **Statewide data**: Access to all Florida traffic data
 - **Year selection**: Choose data from different years
 - **Geographic data**: Includes latitude/longitude coordinates
 - **Error handling**: Graceful fallback to sample data
@@ -233,8 +233,8 @@ The application includes cities from all major Florida counties:
 - **Other Major Cities**: Orlando, Tampa, Jacksonville, St. Petersburg, etc.
 
 ### Usage
-1. **Select County**: Choose your target county from the sidebar
-2. **Select City**: Choose a specific city or "All Cities" for county-wide analysis
+1. **Select City**: Choose your target city from the sidebar
+2. **Choose Analysis Scope**: Select "All Cities" for statewide analysis or a specific city
 3. **Load Data**: The application will filter traffic data based on your selection
 4. **View Results**: See V/C ratios and analysis for your selected area
 
@@ -300,6 +300,7 @@ For support and questions:
 - **v1.2.0**: Enhanced with TAZ-based growth projections
 - **v1.3.0**: Improved UI and added comprehensive documentation
 - **v1.4.0**: Added FDOT Open Data Hub integration with comprehensive city selection (113+ Florida cities)
+- **v1.5.0**: Removed county selection - all data now syncs with city selection field
 
 ---
 

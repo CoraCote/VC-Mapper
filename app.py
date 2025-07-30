@@ -47,12 +47,11 @@ if 'data_loaded' not in st.session_state:
 if 'vc_results' not in st.session_state:
     st.session_state.vc_results = None
 
-def load_fdot_traffic_data(county="Palm Beach", city=None):
+def load_fdot_traffic_data(city=None):
     """
     Load traffic data from FDOT Traffic Online API using ArcGIS REST API
     
     Args:
-        county: County name for filtering
         city: City name for filtering (optional)
     """
     try:
@@ -63,7 +62,8 @@ def load_fdot_traffic_data(county="Palm Beach", city=None):
         
         # Try to get AADT data first (more comprehensive)
         st.info("🔍 Fetching AADT data from FDOT API...")
-        traffic_data = fdot_api.get_aadt_data(county=county, year=2023)
+        # Get data for all counties and filter by city
+        traffic_data = fdot_api.get_aadt_data(year=2023)
         
         if not traffic_data.empty:
             # Filter by city if specified
@@ -85,7 +85,7 @@ def load_fdot_traffic_data(county="Palm Beach", city=None):
         else:
             # Fallback to traffic monitoring sites
             st.info("🔍 AADT data not available, fetching traffic monitoring sites...")
-            traffic_data = fdot_api.get_traffic_monitoring_sites(county=county)
+            traffic_data = fdot_api.get_traffic_monitoring_sites()
             
             if not traffic_data.empty:
                 # Rename columns to match expected format
@@ -117,7 +117,7 @@ def load_fdot_traffic_data(county="Palm Beach", city=None):
                 # Fallback to sample data
                 sample_data = {
                     'segment_id': range(1, 21),
-                    'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+                    'road_name': [f"Florida Road {i}" for i in range(1, 21)],
                     'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
                     'current_volume': np.random.randint(5000, 25000, 20),
                     'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
@@ -130,7 +130,7 @@ def load_fdot_traffic_data(county="Palm Beach", city=None):
         # Fallback to sample data
         sample_data = {
             'segment_id': range(1, 21),
-            'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+            'road_name': [f"Florida Road {i}" for i in range(1, 21)],
             'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
             'current_volume': np.random.randint(5000, 25000, 20),
             'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
@@ -142,7 +142,7 @@ def load_fdot_traffic_data(county="Palm Beach", city=None):
         # Fallback to sample data
         sample_data = {
             'segment_id': range(1, 21),
-            'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+            'road_name': [f"Florida Road {i}" for i in range(1, 21)],
             'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
             'current_volume': np.random.randint(5000, 25000, 20),
             'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
@@ -185,13 +185,42 @@ def apply_growth_projection(base_volume, growth_rate, years=20):
     """
     return base_volume * (1 + growth_rate) ** years
 
-def create_interactive_map(gdf):
+def create_interactive_map(gdf, selected_city="All Cities"):
     """
     Create an interactive map with V/C ratio visualization
+    
+    Args:
+        gdf: GeoDataFrame with traffic data
+        selected_city: Selected city for map centering
     """
-    # Create base map centered on Palm Beach County
+    # Default center (Florida)
+    default_lat, default_lon = 27.6648, -81.5158
+    
+    # City-specific coordinates
+    city_coords = {
+        "West Palm Beach": [26.7153, -80.0534],
+        "Boca Raton": [26.3683, -80.1289],
+        "Delray Beach": [26.4615, -80.0728],
+        "Boynton Beach": [26.5317, -80.0905],
+        "Fort Lauderdale": [26.1224, -80.1373],
+        "Hollywood": [26.0112, -80.1495],
+        "Miami": [25.7617, -80.1918],
+        "Miami Beach": [25.7907, -80.1300],
+        "Key West": [24.5557, -81.7826],
+        "Orlando": [28.5383, -81.3792],
+        "Tampa": [27.9506, -82.4572],
+        "Jacksonville": [30.3322, -81.6557]
+    }
+    
+    # Get coordinates for selected city or use default
+    if selected_city in city_coords:
+        center_lat, center_lon = city_coords[selected_city]
+    else:
+        center_lat, center_lon = default_lat, default_lon
+    
+    # Create base map centered on selected city or Florida
     m = folium.Map(
-        location=[26.7153, -80.0534],
+        location=[center_lat, center_lon],
         zoom_start=10,
         tiles='OpenStreetMap'
     )
@@ -239,13 +268,6 @@ def main():
     # Sidebar for configuration
     with st.sidebar:
         st.header("Configuration")
-        
-        # County selection
-        county = st.selectbox(
-            "Select County",
-            ["Palm Beach", "Broward", "Miami-Dade", "Monroe"],
-            index=0
-        )
         
         # City selection with FDOT Open Data Hub integration
         st.subheader("City Selection")
@@ -375,7 +397,7 @@ def main():
     if st.session_state.data_loaded:
         # Load data
         with st.spinner("Loading traffic data..."):
-            traffic_data = load_fdot_traffic_data(county, selected_city)
+            traffic_data = load_fdot_traffic_data(selected_city)
             capacity_data = load_capacity_table()
         
         # Display raw FDOT data
@@ -490,7 +512,7 @@ def main():
         map_data['vc_ratio'] = map_data['vc_ratio_future']  # Use future V/C for mapping
         
         # Create map
-        map_obj = create_interactive_map(map_data)
+        map_obj = create_interactive_map(map_data, selected_city)
         folium_static(map_obj, width=800, height=500)
         
         # V/C Ratio Distribution
@@ -575,7 +597,7 @@ def main():
         
         ### Getting Started:
         1. Configure your settings in the sidebar
-        2. Select your county and growth parameters
+        2. Select your city and growth parameters
         3. Click "Load Data" to begin analysis
         4. Explore the interactive maps and charts
         5. Download your results
@@ -592,7 +614,7 @@ def main():
             st.markdown("""
             ### Step-by-Step Instructions:
             
-            1. **Select County**: Choose your target county from the sidebar
+            1. **Select City**: Choose your target city from the sidebar
             2. **Set Growth Rate**: Adjust the annual growth rate (default: 2%)
             3. **Choose Data Source**: 
                - FDOT Traffic Online (automated)
