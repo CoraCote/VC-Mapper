@@ -16,12 +16,14 @@ This application is designed for mobility planning and transportation consulting
 
 ### 🔄 Data Integration
 - **FDOT Traffic Online API** integration for automated data retrieval
+- **FDOT Open Data Hub API** integration for comprehensive city selection
 - **Real-time data display** with detailed statistics and metadata
 - **TAZ-based growth projections** with customizable rates
 - **Shapefile/geodatabase support** for roadway segment data
 
 ### 📊 Analysis & Visualization
 - **Raw FDOT data display** with detailed data information
+- **City-based filtering** with comprehensive Florida cities list
 - **Interactive maps** with color-coded V/C ratios
 - **Statistical analysis** with summary metrics and distributions
 - **Growth projections** with customizable time horizons
@@ -185,18 +187,56 @@ The application integrates with FDOT's Traffic Online system using their ArcGIS 
 - **Rate limiting**: Configured for API compliance
 - **Fallback**: Sample data when API is unavailable
 
+### FDOT Open Data Hub
+The application integrates with FDOT's Open Data Hub for comprehensive city selection:
+- **Base URL**: `https://gis-fdot.opendata.arcgis.com`
+- **API Version**: OGC API - Records 1.0.0
+- **Endpoints**: 
+  - `/api/search/v1/catalog` - Search available datasets
+  - `/api/search/v1/collections/{collectionId}/items` - Get collection items
+- **Authentication**: Public API, no authentication required
+- **Fallback**: Comprehensive Florida cities list when API data unavailable
+
 ### FDOT API Features
 - **Real-time data**: Live traffic volume data from FDOT
 - **County filtering**: Filter data by specific counties
+- **City filtering**: Filter data by specific cities within counties
 - **Year selection**: Choose data from different years
 - **Geographic data**: Includes latitude/longitude coordinates
 - **Error handling**: Graceful fallback to sample data
+- **Comprehensive city list**: 113+ Florida cities available for selection
 
 ### Placer.ai Integration
 Support for Placer.ai traffic data:
 - **CSV format** with standardized column names
 - **Automatic validation** of data quality
 - **Processing pipeline** for data standardization
+
+## 🏙️ City Selection Feature
+
+### Overview
+The application now includes comprehensive city selection functionality powered by FDOT's Open Data Hub API:
+
+### Features
+- **113+ Florida Cities**: Comprehensive list including all major cities and municipalities
+- **County-based Organization**: Cities organized by county for easy selection
+- **Real-time API Integration**: Connects to FDOT Open Data Hub for live city data
+- **Fallback System**: Comprehensive Florida cities list when API is unavailable
+- **Smart Filtering**: Filter traffic data by specific cities or analyze all cities in a county
+
+### Supported Cities
+The application includes cities from all major Florida counties:
+- **Palm Beach County**: West Palm Beach, Boca Raton, Delray Beach, Boynton Beach, etc.
+- **Broward County**: Fort Lauderdale, Hollywood, Pompano Beach, Coral Springs, etc.
+- **Miami-Dade County**: Miami, Hialeah, Miami Beach, Coral Gables, etc.
+- **Monroe County**: Key West, Marathon, Key Largo, Islamorada, etc.
+- **Other Major Cities**: Orlando, Tampa, Jacksonville, St. Petersburg, etc.
+
+### Usage
+1. **Select County**: Choose your target county from the sidebar
+2. **Select City**: Choose a specific city or "All Cities" for county-wide analysis
+3. **Load Data**: The application will filter traffic data based on your selection
+4. **View Results**: See V/C ratios and analysis for your selected area
 
 ## 🛠️ Development
 
@@ -259,6 +299,7 @@ For support and questions:
 - **v1.1.0**: Added interactive mapping and export capabilities
 - **v1.2.0**: Enhanced with TAZ-based growth projections
 - **v1.3.0**: Improved UI and added comprehensive documentation
+- **v1.4.0**: Added FDOT Open Data Hub integration with comprehensive city selection (113+ Florida cities)
 
 ---
 

@@ -47,9 +47,13 @@ if 'data_loaded' not in st.session_state:
 if 'vc_results' not in st.session_state:
     st.session_state.vc_results = None
 
-def load_fdot_traffic_data(county="Palm Beach"):
+def load_fdot_traffic_data(county="Palm Beach", city=None):
     """
     Load traffic data from FDOT Traffic Online API using ArcGIS REST API
+    
+    Args:
+        county: County name for filtering
+        city: City name for filtering (optional)
     """
     try:
         from fdot_api import FDOTArcGISAPI
@@ -62,6 +66,19 @@ def load_fdot_traffic_data(county="Palm Beach"):
         traffic_data = fdot_api.get_aadt_data(county=county, year=2023)
         
         if not traffic_data.empty:
+            # Filter by city if specified
+            if city and city != "All Cities":
+                # Try to filter by city name in various possible columns
+                city_columns = [col for col in traffic_data.columns if any(term in col.lower() for term in ['city', 'municipal', 'name'])]
+                if city_columns:
+                    # Filter by city name
+                    original_count = len(traffic_data)
+                    traffic_data = traffic_data[traffic_data[city_columns[0]].str.contains(city, case=False, na=False)]
+                    filtered_count = len(traffic_data)
+                    st.info(f"🔍 Filtered data for city '{city}': {filtered_count} records (from {original_count} total)")
+                else:
+                    st.warning(f"⚠️ Could not filter by city '{city}' - no city column found in data")
+            
             st.session_state.fdot_data_source = "FDOT AADT Data (Layer 1)"
             st.success(f"✅ Successfully loaded {len(traffic_data)} AADT records from FDOT API")
             return traffic_data
@@ -77,6 +94,20 @@ def load_fdot_traffic_data(county="Palm Beach"):
                     'site_name': 'road_name',
                     'aadt': 'current_volume'
                 })
+                
+                # Filter by city if specified
+                if city and city != "All Cities":
+                    # Try to filter by city name in various possible columns
+                    city_columns = [col for col in traffic_data.columns if any(term in col.lower() for term in ['city', 'municipal', 'name'])]
+                    if city_columns:
+                        # Filter by city name
+                        original_count = len(traffic_data)
+                        traffic_data = traffic_data[traffic_data[city_columns[0]].str.contains(city, case=False, na=False)]
+                        filtered_count = len(traffic_data)
+                        st.info(f"🔍 Filtered data for city '{city}': {filtered_count} records (from {original_count} total)")
+                    else:
+                        st.warning(f"⚠️ Could not filter by city '{city}' - no city column found in data")
+                
                 st.session_state.fdot_data_source = "FDOT Traffic Monitoring Sites (Layer 0)"
                 st.success(f"✅ Successfully loaded {len(traffic_data)} traffic monitoring sites from FDOT API")
                 return traffic_data
@@ -216,6 +247,67 @@ def main():
             index=0
         )
         
+        # City selection with FDOT Open Data Hub integration
+        st.subheader("City Selection")
+        
+        # Initialize city list in session state
+        if 'cities_list' not in st.session_state:
+            st.session_state.cities_list = []
+            st.session_state.cities_loaded = False
+        
+        # Load cities from FDOT Open Data Hub
+        if not st.session_state.cities_loaded:
+            with st.spinner("Loading cities from FDOT Open Data Hub..."):
+                try:
+                    from fdot_opendata_api import FDOTOpenDataAPI
+                    api = FDOTOpenDataAPI()
+                    
+                    if api.test_connection():
+                        cities = api.get_florida_cities()
+                        if cities:
+                            st.session_state.cities_list = cities
+                            st.session_state.cities_loaded = True
+                            st.success(f"✅ Loaded {len(cities)} cities from FDOT Open Data Hub")
+                        else:
+                            st.warning("⚠️ No cities found in FDOT Open Data Hub, using default list")
+                            st.session_state.cities_list = [
+                                "West Palm Beach", "Boca Raton", "Delray Beach", "Boynton Beach", 
+                                "Lake Worth", "Wellington", "Jupiter", "Palm Beach Gardens",
+                                "Fort Lauderdale", "Hollywood", "Pompano Beach", "Coral Springs",
+                                "Miami", "Hialeah", "Miami Beach", "Coral Gables", "Key West"
+                            ]
+                            st.session_state.cities_loaded = True
+                    else:
+                        st.error("❌ Failed to connect to FDOT Open Data Hub")
+                        st.session_state.cities_list = [
+                            "West Palm Beach", "Boca Raton", "Delray Beach", "Boynton Beach", 
+                            "Lake Worth", "Wellington", "Jupiter", "Palm Beach Gardens",
+                            "Fort Lauderdale", "Hollywood", "Pompano Beach", "Coral Springs",
+                            "Miami", "Hialeah", "Miami Beach", "Coral Gables", "Key West"
+                        ]
+                        st.session_state.cities_loaded = True
+                except Exception as e:
+                    st.error(f"❌ Error loading cities: {e}")
+                    st.session_state.cities_list = [
+                        "West Palm Beach", "Boca Raton", "Delray Beach", "Boynton Beach", 
+                        "Lake Worth", "Wellington", "Jupiter", "Palm Beach Gardens",
+                        "Fort Lauderdale", "Hollywood", "Pompano Beach", "Coral Springs",
+                        "Miami", "Hialeah", "Miami Beach", "Coral Gables", "Key West"
+                    ]
+                    st.session_state.cities_loaded = True
+        
+        # City selection dropdown
+        selected_city = st.selectbox(
+            "Select City",
+            ["All Cities"] + st.session_state.cities_list,
+            index=0,
+            help="Select a specific city or 'All Cities' to analyze all cities in the county"
+        )
+        
+        # Show city count
+        if st.session_state.cities_loaded:
+            st.info(f"📋 Available cities: {len(st.session_state.cities_list)}")
+        
         # Growth rate input
         st.subheader("Growth Projections")
         growth_rate = st.slider(
@@ -248,24 +340,42 @@ def main():
         
         # Test FDOT API button
         st.subheader("🔧 API Testing")
-        if st.button("Test FDOT API"):
-            with st.spinner("Testing FDOT API connection..."):
-                try:
-                    from fdot_api import test_fdot_api
-                    test_df = test_fdot_api()
-                    if not test_df.empty:
-                        st.success(f"✅ FDOT API test successful! Found {len(test_df)} records")
-                        st.dataframe(test_df.head())
-                    else:
-                        st.warning("⚠️ FDOT API test completed but no data found")
-                except Exception as e:
-                    st.error(f"❌ FDOT API test failed: {e}")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("Test FDOT Traffic API"):
+                with st.spinner("Testing FDOT Traffic API connection..."):
+                    try:
+                        from fdot_api import test_fdot_api
+                        test_df = test_fdot_api()
+                        if not test_df.empty:
+                            st.success(f"✅ FDOT Traffic API test successful! Found {len(test_df)} records")
+                            st.dataframe(test_df.head())
+                        else:
+                            st.warning("⚠️ FDOT Traffic API test completed but no data found")
+                    except Exception as e:
+                        st.error(f"❌ FDOT Traffic API test failed: {e}")
+        
+        with col2:
+            if st.button("Test FDOT Open Data Hub"):
+                with st.spinner("Testing FDOT Open Data Hub connection..."):
+                    try:
+                        from fdot_opendata_api import test_fdot_opendata_api
+                        test_df = test_fdot_opendata_api()
+                        if not test_df.empty:
+                            st.success(f"✅ FDOT Open Data Hub test successful! Found {len(test_df)} cities")
+                            st.dataframe(test_df.head())
+                        else:
+                            st.warning("⚠️ FDOT Open Data Hub test completed but no cities found")
+                    except Exception as e:
+                        st.error(f"❌ FDOT Open Data Hub test failed: {e}")
     
     # Main content area
     if st.session_state.data_loaded:
         # Load data
         with st.spinner("Loading traffic data..."):
-            traffic_data = load_fdot_traffic_data(county)
+            traffic_data = load_fdot_traffic_data(county, selected_city)
             capacity_data = load_capacity_table()
         
         # Display raw FDOT data
