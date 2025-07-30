@@ -16,11 +16,12 @@ This application is designed for mobility planning and transportation consulting
 
 ### 🔄 Data Integration
 - **FDOT Traffic Online API** integration for automated data retrieval
-- **CSV upload support** for Placer.ai and other traffic data sources
+- **Real-time data display** with detailed statistics and metadata
 - **TAZ-based growth projections** with customizable rates
 - **Shapefile/geodatabase support** for roadway segment data
 
 ### 📊 Analysis & Visualization
+- **Raw FDOT data display** with detailed data information
 - **Interactive maps** with color-coded V/C ratios
 - **Statistical analysis** with summary metrics and distributions
 - **Growth projections** with customizable time horizons
@@ -104,10 +105,26 @@ This application is designed for mobility planning and transportation consulting
 2. **Configure settings** in the sidebar:
    - Select your target county
    - Set growth rate and projection years
-   - Choose data source (FDOT API, CSV upload, or manual entry)
-3. **Click "Load Data"** to begin analysis
-4. **Explore results** through interactive maps, charts, and tables
-5. **Export results** in your preferred format
+   - Choose data source (FDOT API or manual entry)
+3. **Test FDOT API** (optional): Click "Test FDOT API" to verify connection
+4. **Click "Load Data"** to begin analysis
+5. **Review raw FDOT data** displayed in the dashboard
+6. **Explore V/C analysis** through interactive maps, charts, and tables
+7. **Export results** in your preferred format
+
+### Testing the Application
+
+You can test the FDOT API integration using the provided test script:
+
+```bash
+python test_fdot_api.py
+```
+
+This will verify:
+- ✅ FDOT API connectivity
+- ✅ Data retrieval and processing
+- ✅ Streamlit integration
+- ✅ Error handling and fallbacks
 
 ## 📁 Project Structure
 
@@ -116,6 +133,8 @@ VC-Mapper/
 ├── app.py                 # Main Streamlit application
 ├── utils.py              # Utility functions and classes
 ├── config.py             # Configuration settings
+├── fdot_api.py           # FDOT ArcGIS REST API integration
+├── test_fdot_api.py      # API testing script
 ├── requirements.txt      # Python dependencies
 ├── environment.yml       # Conda environment
 ├── README.md            # This file
@@ -137,8 +156,7 @@ The application supports multiple Florida counties:
 - **Customizable time horizons**: 5-30 year projections
 
 ### Data Sources
-- **FDOT Traffic Online**: Automated data retrieval
-- **CSV Upload**: Manual upload of traffic data
+- **FDOT Traffic Online**: Automated data retrieval from ArcGIS REST API
 - **Manual Entry**: For testing and small datasets
 
 ## 📊 Data Requirements
@@ -158,10 +176,21 @@ The application supports multiple Florida counties:
 ## 🔌 API Integration
 
 ### FDOT Traffic Online
-The application is designed to integrate with FDOT's Traffic Online system:
-- **Base URL**: `https://tdaappsprod.dot.state.fl.us/fto/`
-- **Authentication**: Required for production use
+The application integrates with FDOT's Traffic Online system using their ArcGIS REST API:
+- **Base URL**: `https://devgis.fdot.gov/arcgis/rest/services/fto/fto_DEV/MapServer`
+- **Layers**: 
+  - Layer 0: Traffic Monitoring Sites
+  - Layer 1: AADT (Annual Average Daily Traffic) Data
+- **Authentication**: Public API, no authentication required
 - **Rate limiting**: Configured for API compliance
+- **Fallback**: Sample data when API is unavailable
+
+### FDOT API Features
+- **Real-time data**: Live traffic volume data from FDOT
+- **County filtering**: Filter data by specific counties
+- **Year selection**: Choose data from different years
+- **Geographic data**: Includes latitude/longitude coordinates
+- **Error handling**: Graceful fallback to sample data
 
 ### Placer.ai Integration
 Support for Placer.ai traffic data:

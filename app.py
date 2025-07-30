@@ -49,18 +49,74 @@ if 'vc_results' not in st.session_state:
 
 def load_fdot_traffic_data(county="Palm Beach"):
     """
-    Load traffic data from FDOT Traffic Online API
-    This is a placeholder function - actual implementation would connect to FDOT API
+    Load traffic data from FDOT Traffic Online API using ArcGIS REST API
     """
-    # Placeholder data - in real implementation, this would query FDOT Traffic Online
-    sample_data = {
-        'segment_id': range(1, 21),
-        'road_name': [f"Road {i}" for i in range(1, 21)],
-        'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
-        'current_volume': np.random.randint(5000, 25000, 20),
-        'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
-    }
-    return pd.DataFrame(sample_data)
+    try:
+        from fdot_api import FDOTArcGISAPI
+        
+        # Initialize FDOT API client
+        fdot_api = FDOTArcGISAPI()
+        
+        # Try to get AADT data first (more comprehensive)
+        st.info("🔍 Fetching AADT data from FDOT API...")
+        traffic_data = fdot_api.get_aadt_data(county=county, year=2023)
+        
+        if not traffic_data.empty:
+            st.session_state.fdot_data_source = "FDOT AADT Data (Layer 1)"
+            st.success(f"✅ Successfully loaded {len(traffic_data)} AADT records from FDOT API")
+            return traffic_data
+        else:
+            # Fallback to traffic monitoring sites
+            st.info("🔍 AADT data not available, fetching traffic monitoring sites...")
+            traffic_data = fdot_api.get_traffic_monitoring_sites(county=county)
+            
+            if not traffic_data.empty:
+                # Rename columns to match expected format
+                traffic_data = traffic_data.rename(columns={
+                    'site_id': 'segment_id',
+                    'site_name': 'road_name',
+                    'aadt': 'current_volume'
+                })
+                st.session_state.fdot_data_source = "FDOT Traffic Monitoring Sites (Layer 0)"
+                st.success(f"✅ Successfully loaded {len(traffic_data)} traffic monitoring sites from FDOT API")
+                return traffic_data
+            else:
+                st.warning("⚠️ No real data available from FDOT API, using sample data")
+                st.session_state.fdot_data_source = "Sample Data (API Unavailable)"
+                # Fallback to sample data
+                sample_data = {
+                    'segment_id': range(1, 21),
+                    'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+                    'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
+                    'current_volume': np.random.randint(5000, 25000, 20),
+                    'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
+                }
+                return pd.DataFrame(sample_data)
+            
+    except ImportError:
+        st.error("❌ FDOT API module not available, using sample data")
+        st.session_state.fdot_data_source = "Sample Data (Module Not Available)"
+        # Fallback to sample data
+        sample_data = {
+            'segment_id': range(1, 21),
+            'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+            'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
+            'current_volume': np.random.randint(5000, 25000, 20),
+            'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
+        }
+        return pd.DataFrame(sample_data)
+    except Exception as e:
+        st.error(f"❌ Error connecting to FDOT API: {e}")
+        st.session_state.fdot_data_source = "Sample Data (API Error)"
+        # Fallback to sample data
+        sample_data = {
+            'segment_id': range(1, 21),
+            'road_name': [f"{county} Road {i}" for i in range(1, 21)],
+            'functional_class': ['Arterial'] * 10 + ['Collector'] * 10,
+            'current_volume': np.random.randint(5000, 25000, 20),
+            'geometry': [f"POINT({-80.1 + i*0.01} {26.7 + i*0.01})" for i in range(20)]
+        }
+        return pd.DataFrame(sample_data)
 
 def load_capacity_table():
     """
@@ -183,18 +239,27 @@ def main():
         st.subheader("Data Sources")
         data_source = st.radio(
             "Traffic Data Source",
-            ["FDOT Traffic Online", "Upload CSV File", "Manual Entry"]
+            ["FDOT Traffic Online", "Manual Entry"]
         )
-        
-        if data_source == "Upload CSV File":
-            uploaded_file = st.file_uploader(
-                "Upload Placer.ai CSV file",
-                type=['csv']
-            )
         
         # Load data button
         if st.button("Load Data", type="primary"):
             st.session_state.data_loaded = True
+        
+        # Test FDOT API button
+        st.subheader("🔧 API Testing")
+        if st.button("Test FDOT API"):
+            with st.spinner("Testing FDOT API connection..."):
+                try:
+                    from fdot_api import test_fdot_api
+                    test_df = test_fdot_api()
+                    if not test_df.empty:
+                        st.success(f"✅ FDOT API test successful! Found {len(test_df)} records")
+                        st.dataframe(test_df.head())
+                    else:
+                        st.warning("⚠️ FDOT API test completed but no data found")
+                except Exception as e:
+                    st.error(f"❌ FDOT API test failed: {e}")
     
     # Main content area
     if st.session_state.data_loaded:
@@ -202,6 +267,54 @@ def main():
         with st.spinner("Loading traffic data..."):
             traffic_data = load_fdot_traffic_data(county)
             capacity_data = load_capacity_table()
+        
+        # Display raw FDOT data
+        st.header("📊 FDOT Traffic Data")
+        
+        # Show data source info
+        if 'fdot_data_source' in st.session_state:
+            st.info(f"📡 Data Source: {st.session_state.fdot_data_source}")
+        
+        # Display raw traffic data
+        st.subheader("🗂️ Raw Traffic Data")
+        st.write(f"**Total Records:** {len(traffic_data)}")
+        
+        # Show data info
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**Data Columns:**")
+            st.write(list(traffic_data.columns))
+        with col2:
+            st.write("**Data Types:**")
+            st.write(traffic_data.dtypes.to_dict())
+        
+        # Display the raw data table
+        st.dataframe(
+            traffic_data,
+            use_container_width=True,
+            height=300
+        )
+        
+        # Show data statistics
+        st.subheader("📈 Data Statistics")
+        if 'current_volume' in traffic_data.columns:
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Min Volume", f"{traffic_data['current_volume'].min():,.0f}")
+            with col2:
+                st.metric("Max Volume", f"{traffic_data['current_volume'].max():,.0f}")
+            with col3:
+                st.metric("Mean Volume", f"{traffic_data['current_volume'].mean():,.0f}")
+            with col4:
+                st.metric("Total Volume", f"{traffic_data['current_volume'].sum():,.0f}")
+        
+        # Show functional class distribution
+        if 'functional_class' in traffic_data.columns:
+            st.subheader("🛣️ Functional Class Distribution")
+            class_counts = traffic_data['functional_class'].value_counts()
+            st.bar_chart(class_counts)
+        
+        st.divider()
         
         # Calculate V/C ratios
         st.header("📊 V/C Ratio Analysis")
