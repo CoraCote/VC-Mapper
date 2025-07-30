@@ -1,0 +1,21 @@
+road_name,current_volume,functional_class,segment_id,latitude,longitude
+Palm Beach Blvd,18500,Arterial,1,26.7153,-80.0534
+Okeechobee Blvd,22000,Arterial,2,26.7200,-80.0600
+Southern Blvd,19500,Arterial,3,26.7250,-80.0650
+Forest Hill Blvd,12500,Collector,4,26.7300,-80.0700
+Belvedere Rd,9800,Collector,5,26.7350,-80.0750
+Lake Worth Rd,15800,Arterial,6,26.7400,-80.0800
+Lantana Rd,11200,Collector,7,26.7450,-80.0850
+Boynton Beach Blvd,16800,Arterial,8,26.7500,-80.0900
+Atlantic Ave,14200,Arterial,9,26.7550,-80.0950
+Congress Ave,8900,Collector,10,26.7600,-80.1000
+Jog Rd,7600,Collector,11,26.7650,-80.1050
+Military Trail,13400,Arterial,12,26.7700,-80.1100
+Powerline Rd,6800,Collector,13,26.7750,-80.1150
+Federal Hwy,19200,Arterial,14,26.7800,-80.1200
+A1A,8200,Collector,15,26.7850,-80.1250
+Blue Heron Blvd,11600,Collector,16,26.7900,-80.1300
+Northlake Blvd,15200,Arterial,17,26.7950,-80.1350
+Beeline Hwy,28000,Freeway,18,26.8000,-80.1400
+Turnpike,45000,Freeway,19,26.8050,-80.1450
+I-95,52000,Freeway,20,26.8100,-80.1500 

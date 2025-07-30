@@ -5,4 +5,8 @@ openpyxl
 shapely
 fiona
 folium
-pydeck 
+pydeck
+streamlit-folium
+plotly
+numpy
+requests 
