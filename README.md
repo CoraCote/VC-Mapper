@@ -1,6 +1,6 @@
-# VC-Mapper - FDOT City Data Explorer
+# FDOT City Data Explorer
 
-A Streamlit application for exploring city boundary data from the Florida Department of Transportation (FDOT) GIS API.
+A simple Streamlit application for exploring city boundary data from the Florida Department of Transportation (FDOT) GIS API.
 
 ## Features
 
@@ -121,6 +121,18 @@ The application includes comprehensive error handling for:
 - `requests`: HTTP client for API calls
 - `pandas`: Data manipulation and display
 - `logging`: Application logging
+
+## Project Structure
+
+```
+VC-Mapper/
+├── app.py                 # Main Streamlit application
+├── fdot_api.py           # FDOT GIS API integration
+├── test_fdot_api.py      # API testing
+├── requirements.txt      # Python dependencies
+├── README.md            # Documentation
+└── venv/                # Virtual environment
+```
 
 ## Contributing
 

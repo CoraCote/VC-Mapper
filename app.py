@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
-import requests
-import json
-from typing import List, Dict, Optional
+from typing import List, Dict
 import logging
 from fdot_api import FDOTGISAPI
 
@@ -12,50 +10,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize the FDOT GIS API client
 fdot_api = FDOTGISAPI()
-
-def fetch_cities_from_fdot() -> List[Dict]:
-    """
-    Fetch city data from FDOT GIS API
-    
-    Returns:
-        List of city dictionaries with standardized format
-    """
-    try:
-        logger.info("Fetching cities from FDOT GIS API...")
-        cities = fdot_api.fetch_cities()
-        
-        if not cities:
-            logger.warning("No cities returned from FDOT GIS API")
-            return []
-        
-        logger.info(f"Successfully fetched {len(cities)} cities from FDOT GIS API")
-        return cities
-        
-    except Exception as e:
-        logger.error(f"Error fetching cities from FDOT GIS API: {e}")
-        return []
-
-def search_cities_from_fdot(query: str, limit: int = 10) -> List[Dict]:
-    """
-    Search for cities using FDOT GIS API
-    
-    Args:
-        query: Search query string
-        limit: Maximum number of results
-        
-    Returns:
-        List of matching cities
-    """
-    try:
-        logger.info(f"Searching cities with query: {query}")
-        cities = fdot_api.search_cities(query, limit)
-        
-        logger.info(f"Found {len(cities)} cities matching query: {query}")
-        return cities
-        
-    except Exception as e:
-        logger.error(f"Error searching cities: {e}")
-        return []
 
 def display_city_data(cities: List[Dict]) -> None:
     """
@@ -112,12 +66,12 @@ def main():
     Main Streamlit application
     """
     st.set_page_config(
-        page_title="VC-Mapper - FDOT City Data",
+        page_title="FDOT City Data Explorer",
         page_icon="🗺️",
         layout="wide"
     )
     
-    st.title("🗺️ VC-Mapper - FDOT City Data Explorer")
+    st.title("🗺️ FDOT City Data Explorer")
     st.markdown("Explore city boundary data from the Florida Department of Transportation GIS API")
     
     # Sidebar for controls
