@@ -21,7 +21,7 @@ class TrafficController:
     
     def __init__(self):
         """Initialize the traffic controller with FDOT AADT service configuration"""
-        self.base_url = "https://services.arcgis.com/V6ZHFr6zdgNZuVG0/ArcGIS/rest/services/Florida_Annual_Average_Daily_Traffic/FeatureServer/0/query"
+        self.base_url = "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Annual_Average_Daily_Traffic_TDA/FeatureServer/0/query"
         self.default_params = {
             'outFields': '*',
             'where': '1=1',
@@ -35,8 +35,9 @@ class TrafficController:
     def fetch_traffic_data(self, 
                           county_filter: Optional[str] = None,
                           roadway_filter: Optional[str] = None,
-                          max_records: int = 1000,
-                          use_cache: bool = True) -> Optional[TrafficCollection]:
+                          max_records: Optional[int] = None,
+                          use_cache: bool = True,
+                          most_recent_only: bool = True) -> Optional[TrafficCollection]:
         """
         Fetch FDOT Annual Average Daily Traffic (AADT) data from FDOT GIS service
         
@@ -45,6 +46,7 @@ class TrafficController:
             roadway_filter: Optional roadway description to filter results  
             max_records: Maximum number of records to fetch
             use_cache: Whether to use cached data if available
+            most_recent_only: Whether to fetch only the most recent year of data
             
         Returns:
             TrafficCollection with fetched AADT data or None if error
@@ -55,12 +57,27 @@ class TrafficController:
                 logger.info("Using cached traffic data")
                 return self._cached_data
             
+            # Get the most recent year available if requested
+            most_recent_year = None
+            if most_recent_only:
+                most_recent_year = self._get_most_recent_year()
+                if most_recent_year:
+                    logger.info(f"Fetching most recent AADT data for year: {most_recent_year}")
+                else:
+                    logger.warning("Could not determine most recent year, fetching all available data")
+            
             # Build query parameters
             params = self.default_params.copy()
-            params['resultRecordCount'] = max_records
+            # Only set record count if max_records is specified
+            if max_records is not None:
+                params['resultRecordCount'] = max_records
             
             # Add filters if specified
             where_clauses = ['1=1']
+            
+            # Filter by most recent year if available
+            if most_recent_year:
+                where_clauses.append(f"YEAR_ = {most_recent_year}")
             
             if county_filter:
                 where_clauses.append(f"COUNTY LIKE '%{county_filter}%'")
@@ -91,7 +108,11 @@ class TrafficController:
             self._cached_data = traffic_collection
             self._last_fetch_time = datetime.now()
             
-            logger.info(f"Successfully fetched {len(traffic_collection)} traffic segments")
+            # Log year information
+            if traffic_collection and len(traffic_collection) > 0:
+                years_in_data = set(td.year for td in traffic_collection.traffic_data)
+                logger.info(f"Successfully fetched {len(traffic_collection)} traffic segments from years: {sorted(years_in_data)}")
+            
             return traffic_collection
             
         except requests.exceptions.RequestException as e:
@@ -144,6 +165,49 @@ class TrafficController:
             raise
         
         return traffic_collection
+    
+    def _get_most_recent_year(self) -> Optional[int]:
+        """
+        Get the most recent year available in the FDOT AADT data
+        
+        Returns:
+            Most recent year as integer, or None if unable to determine
+        """
+        try:
+            # Query for distinct years to find the most recent
+            params = {
+                'where': '1=1',
+                'returnDistinctValues': 'true',
+                'outFields': 'YEAR_',
+                'f': 'json'
+            }
+            
+            response = requests.get(
+                self.base_url, 
+                params=params, 
+                timeout=15,
+                headers={'User-Agent': 'VC-Mapper-FDOT-AADT/1.0'}
+            )
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            if 'features' in data:
+                years = []
+                for feature in data['features']:
+                    year_val = feature['attributes']['YEAR_']
+                    if year_val and isinstance(year_val, int):
+                        years.append(year_val)
+                
+                if years:
+                    most_recent = max(years)
+                    logger.info(f"Found {len(years)} distinct years in AADT data. Most recent: {most_recent}")
+                    return most_recent
+                    
+        except Exception as e:
+            logger.warning(f"Could not determine most recent year: {e}")
+            
+        return None
     
     def _is_cache_valid(self) -> bool:
         """
@@ -248,7 +312,7 @@ class TrafficController:
     def fetch_and_cache_traffic_data(self, 
                                    county_filter: Optional[str] = None,
                                    roadway_filter: Optional[str] = None,
-                                   max_records: int = 1000,
+                                   max_records: Optional[int] = None,
                                    force_refresh: bool = False) -> Optional[TrafficCollection]:
         """
         Fetch traffic data and cache it in session state
@@ -268,12 +332,13 @@ class TrafficController:
             if session_data and self._is_cache_valid():
                 return session_data
         
-        # Fetch new data
+        # Fetch new data (always fetch most recent data by default)
         traffic_collection = self.fetch_traffic_data(
             county_filter=county_filter,
             roadway_filter=roadway_filter,
             max_records=max_records,
-            use_cache=not force_refresh
+            use_cache=not force_refresh,
+            most_recent_only=True
         )
         
         # Save to session if successful

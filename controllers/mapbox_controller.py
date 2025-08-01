@@ -555,11 +555,12 @@ class MapboxController:
                 color = traffic.get_color_by_traffic_level()
                 width = traffic.get_line_width_by_volume() if show_volume else 3
                 
-                # Create data point for visualization
+                # Create data point for visualization with enhanced AADT information
                 traffic_viz_data.append({
                     'path': path_coords,
                     'roadway_name': traffic.roadway_name,
-                    'traffic_volume': traffic.traffic_volume,
+                    'traffic_volume': traffic.aadt,  # Use AADT value
+                    'aadt': traffic.aadt,
                     'average_speed': traffic.average_speed,
                     'speed_limit': traffic.speed_limit,
                     'speed_ratio': traffic.speed_ratio,
@@ -569,7 +570,13 @@ class MapboxController:
                     'color': color,
                     'width': width,
                     'volume_category': traffic.volume_category,
-                    'data_timestamp': traffic.data_timestamp
+                    'data_timestamp': str(traffic.year),  # Show year instead of timestamp
+                    'data_quality': traffic.data_quality,
+                    'confidence_level': traffic.confidence_level,
+                    'year': traffic.year,
+                    'district': traffic.district,
+                    'desc_from': traffic.desc_from,
+                    'desc_to': traffic.desc_to
                 })
             
             if not traffic_viz_data:
@@ -579,16 +586,15 @@ class MapboxController:
             # Convert to DataFrame
             df = pd.DataFrame(traffic_viz_data)
             
-            # Create enhanced tooltip
+            # Create enhanced tooltip for AADT data
             tooltip_html = """
             <b>🛣️ {roadway_name}</b><br/>
             <b>📊 Traffic Level:</b> {traffic_level}<br/>
-            <b>🚗 Volume:</b> {traffic_volume:,} vehicles<br/>
-            <b>⚡ Speed:</b> {average_speed:.1f} mph (Limit: {speed_limit} mph)<br/>
-            <b>📈 Speed Ratio:</b> {speed_ratio:.2f}<br/>
-            <b>🧭 Direction:</b> {direction}<br/>
+            <b>🚗 AADT:</b> {traffic_volume:,} vehicles/day<br/>
+            <b>📈 Volume Category:</b> {volume_category}<br/>
             <b>📍 County:</b> {county}<br/>
-            <b>🕒 Updated:</b> {data_timestamp}
+            <b>📅 Year:</b> {data_timestamp}<br/>
+            <b>ℹ️ Data Quality:</b> {data_quality}
             """
             
             # Create path layer with enhanced styling

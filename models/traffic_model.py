@@ -62,6 +62,11 @@ class TrafficData:
         self.county = properties.get('COUNTY', 'Unknown')
         self.mng_district = properties.get('MNG_DIST', 'Unknown')
         
+        # Additional location data that might be missing
+        if self.county == 'Unknown':
+            # Try alternate county field names
+            self.county = properties.get('COUNTY_DESC', properties.get('COUNTY_NAME', 'Unknown'))
+        
         # Additional FDOT service fields that may not be in user's sample
         self.truck_per = properties.get('TRUCK_PER', 0)  # % of truck traffic per day
         self.tfctr_copy = properties.get('TFCTR_copy', 0)  # % truck volume per day
@@ -209,39 +214,58 @@ class TrafficData:
     
     def get_color_by_traffic_level(self) -> List[int]:
         """
-        Get color representation based on traffic level
+        Get color representation based on traffic level with enhanced AADT-based color mapping
         
         Returns:
             RGB color values [R, G, B, Alpha]
         """
-        traffic_level = self.get_traffic_level()
-        
-        color_map = {
-            "Low": [0, 255, 0, 180],      # Green
-            "Moderate": [255, 255, 0, 180], # Yellow
-            "High": [255, 165, 0, 180],    # Orange
-            "Heavy": [255, 0, 0, 180]      # Red
-        }
-        
-        return color_map.get(traffic_level, [128, 128, 128, 180])  # Gray default
+        # Use more granular color mapping based on AADT values for better visualization
+        if self.aadt >= 75000:
+            return [139, 0, 0, 200]      # Dark Red - Very Heavy Traffic
+        elif self.aadt >= 50000:
+            return [255, 0, 0, 190]      # Red - Heavy Traffic
+        elif self.aadt >= 35000:
+            return [255, 69, 0, 180]     # Orange Red - High Traffic
+        elif self.aadt >= 25000:
+            return [255, 140, 0, 170]    # Dark Orange - High-Moderate Traffic
+        elif self.aadt >= 15000:
+            return [255, 165, 0, 160]    # Orange - Moderate-High Traffic
+        elif self.aadt >= 10000:
+            return [255, 215, 0, 150]    # Gold - Moderate Traffic
+        elif self.aadt >= 5000:
+            return [255, 255, 0, 140]    # Yellow - Low-Moderate Traffic
+        elif self.aadt >= 2000:
+            return [154, 205, 50, 130]   # Yellow Green - Low Traffic
+        elif self.aadt >= 500:
+            return [0, 255, 0, 120]      # Green - Very Low Traffic
+        else:
+            return [105, 105, 105, 100]  # Dim Gray - Minimal Traffic
     
     def get_line_width_by_volume(self) -> int:
         """
-        Get line width based on AADT traffic volume
+        Get line width based on AADT traffic volume with enhanced granularity
         
         Returns:
             Line width for map visualization
         """
-        if self.aadt >= 50000:
-            return 8
-        elif self.aadt >= 30000:
-            return 6
+        if self.aadt >= 75000:
+            return 12      # Very thick for extremely high traffic
+        elif self.aadt >= 50000:
+            return 10      # Thick for very high traffic
+        elif self.aadt >= 35000:
+            return 8       # Medium-thick for high traffic
+        elif self.aadt >= 25000:
+            return 6       # Medium for moderate-high traffic
         elif self.aadt >= 15000:
-            return 4
+            return 5       # Medium for moderate traffic
+        elif self.aadt >= 10000:
+            return 4       # Medium-thin for low-moderate traffic
         elif self.aadt >= 5000:
-            return 3
+            return 3       # Thin for low traffic
+        elif self.aadt >= 1000:
+            return 2       # Very thin for very low traffic
         else:
-            return 2
+            return 1       # Minimal width for extremely low traffic
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert traffic data to dictionary format"""

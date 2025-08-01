@@ -121,7 +121,7 @@ class MapView:
                 traffic_data = self._get_or_fetch_traffic_data(
                     county_filter=traffic_options.get('county_filter'),
                     roadway_filter=traffic_options.get('roadway_filter'),
-                    max_records=traffic_options.get('max_records', 1000),
+                    max_records=traffic_options.get('max_records'),  # Remove default limit
                     force_refresh=traffic_options.get('force_refresh', False)
                 )
             
@@ -209,7 +209,7 @@ class MapView:
         with col4:
             # Traffic data controls
             show_traffic_data = st.checkbox("🚦 Show Traffic", value=False, 
-                                           help="Display FDOT Annual Average Daily Traffic (AADT) data")
+                                           help="Display FDOT Annual Average Daily Traffic (AADT) data (automatically fetches most recent year available)")
         
         # Initialize traffic options with default values
         traffic_options = {
@@ -218,12 +218,13 @@ class MapView:
             'traffic_level_filter': None,
             'county_filter': None,
             'roadway_filter': None,
-            'max_records': 1000,
+            'max_records': None,  # No default limit
             'force_refresh': False
         }
         
         if show_traffic_data:
             st.markdown("### 🚦 Traffic Data Controls")
+            st.info("💡 **Auto-Recent Data:** The system automatically fetches the most recent year of AADT data available from FDOT.")
             
             # Create traffic control columns
             traffic_col1, traffic_col2, traffic_col3, traffic_col4 = st.columns(4)
@@ -249,10 +250,16 @@ class MapView:
                                              help="Filter by roadway name (optional)")
             
             with traffic_col3:
-                max_records = st.number_input("📊 Max Records", 
-                                            min_value=100, max_value=5000, 
-                                            value=1000, step=100,
-                                            help="Maximum number of traffic segments to load")
+                # Option to limit records for performance
+                limit_records = st.checkbox("📊 Limit Records", value=False,
+                                          help="Check to limit the number of traffic segments for better performance")
+                
+                max_records = None
+                if limit_records:
+                    max_records = st.number_input("Max Records", 
+                                                min_value=100, max_value=10000, 
+                                                value=5000, step=100,
+                                                help="Maximum number of traffic segments to load")
                 
                 force_refresh = st.button("🔄 Refresh Traffic Data",
                                         help="Force refresh of traffic data from server")
@@ -266,6 +273,63 @@ class MapView:
                     st.metric("🚗 Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
                 else:
                     st.info("👆 Enable traffic data above to load FDOT AADT information")
+            
+            # Add AADT Color Legend
+            if show_traffic_data:
+                st.markdown("### 🎨 AADT Traffic Volume Color Legend")
+                legend_col1, legend_col2 = st.columns(2)
+                
+                with legend_col1:
+                    st.markdown("""
+                    <div style="font-size: 12px;">
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 8px; background: rgb(139,0,0); margin-right: 8px;"></div>
+                        <span>75,000+ vehicles/day (Very Heavy)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 6px; background: rgb(255,0,0); margin-right: 8px;"></div>
+                        <span>50,000-75,000 vehicles/day (Heavy)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 5px; background: rgb(255,69,0); margin-right: 8px;"></div>
+                        <span>35,000-50,000 vehicles/day (High)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 4px; background: rgb(255,140,0); margin-right: 8px;"></div>
+                        <span>25,000-35,000 vehicles/day</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 3px; background: rgb(255,165,0); margin-right: 8px;"></div>
+                        <span>15,000-25,000 vehicles/day</span>
+                    </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with legend_col2:
+                    st.markdown("""
+                    <div style="font-size: 12px;">
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 3px; background: rgb(255,215,0); margin-right: 8px;"></div>
+                        <span>10,000-15,000 vehicles/day</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 2px; background: rgb(255,255,0); margin-right: 8px;"></div>
+                        <span>5,000-10,000 vehicles/day</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 2px; background: rgb(154,205,50); margin-right: 8px;"></div>
+                        <span>2,000-5,000 vehicles/day</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 1px; background: rgb(0,255,0); margin-right: 8px;"></div>
+                        <span>500-2,000 vehicles/day (Low)</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin: 2px 0;">
+                        <div style="width: 20px; height: 1px; background: rgb(105,105,105); margin-right: 8px;"></div>
+                        <span>&lt; 500 vehicles/day (Minimal)</span>
+                    </div>
+                    </div>
+                    """, unsafe_allow_html=True)
             
             # Update traffic options
             traffic_options.update({
@@ -347,7 +411,7 @@ class MapView:
     def _get_or_fetch_traffic_data(self, 
                                   county_filter: Optional[str] = None,
                                   roadway_filter: Optional[str] = None,
-                                  max_records: int = 1000,
+                                  max_records: Optional[int] = None,
                                   force_refresh: bool = False) -> Optional[TrafficCollection]:
         """
         Get traffic data from session or fetch from API
@@ -374,8 +438,20 @@ class MapView:
                 if traffic_data and len(traffic_data) > 0:
                     # Display success message with statistics
                     stats = self.traffic_controller.get_traffic_statistics(traffic_data)
+                    
+                    # Get year information from the data
+                    years_in_data = set(td.year for td in traffic_data.traffic_data)
+                    years_str = ", ".join(map(str, sorted(years_in_data, reverse=True)))
+                    most_recent_year = max(years_in_data) if years_in_data else "Unknown"
+                    
                     st.success(f"✅ Loaded {stats['total_segments']} AADT segments "
-                             f"(Avg AADT: {stats['avg_volume']:,.0f} vehicles/day)")
+                             f"(Most Recent Year: {most_recent_year}, Avg AADT: {stats['avg_volume']:,.0f} vehicles/day)")
+                    
+                    # Display year information prominently
+                    if len(years_in_data) == 1:
+                        st.info(f"📅 **Data Year:** {most_recent_year} (Most recent available from FDOT)")
+                    else:
+                        st.info(f"📅 **Data Years:** {years_str} (Displaying most recent available data)")
                     
                     # Display traffic level breakdown
                     level_counts = stats['traffic_levels']
@@ -666,8 +742,19 @@ class MapView:
         st.info(f"📊 **Data Source:** FDOT Annual Average Daily Traffic (AADT)")
         st.info(f"🔢 **Total Segments:** {len(traffic_data)}")
         
+        # Display year information
+        if traffic_data.traffic_data:
+            years_in_data = set(td.year for td in traffic_data.traffic_data)
+            years_str = ", ".join(map(str, sorted(years_in_data, reverse=True)))
+            most_recent_year = max(years_in_data) if years_in_data else "Unknown"
+            
+            if len(years_in_data) == 1:
+                st.info(f"📅 **Data Year:** {most_recent_year} (Most recent available)")
+            else:
+                st.info(f"📅 **Data Years:** {years_str}")
+        
         if traffic_data.last_updated:
-            st.info(f"🕒 **Last Updated:** {traffic_data.last_updated}")
+            st.info(f"🕒 **Last Fetched:** {traffic_data.last_updated}")
         
         # Data quality overview
         quality_counts = {}
