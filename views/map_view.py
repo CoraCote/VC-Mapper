@@ -476,12 +476,12 @@ class MapView:
                     st.metric("🕒 Updated", "Recent")
     
     def _display_traffic_data_table(self, traffic_data: TrafficCollection) -> None:
-        """Display AADT data in tabular format"""
+        """Display AADT data in tabular format with pagination and sorting by most recent date"""
         import pandas as pd
         
         # Convert traffic data to DataFrame
         data_for_table = []
-        for traffic in traffic_data.traffic_data[:100]:  # Limit to 100 rows for performance
+        for traffic in traffic_data.traffic_data:
             data_for_table.append({
                 'Roadway': traffic.roadway_name,
                 'From': traffic.desc_from,
@@ -492,17 +492,117 @@ class MapView:
                 'AADT Flag': traffic.aadt_flag,
                 'Traffic Level': traffic.get_traffic_level(),
                 'Year': traffic.year,
-                'Data Quality': traffic.data_quality
+                'Data Quality': traffic.data_quality,
+                'Data Timestamp': traffic.data_timestamp
             })
         
         if data_for_table:
             df = pd.DataFrame(data_for_table)
-            st.dataframe(df, use_container_width=True, height=400)
             
-            if len(traffic_data) > 100:
-                st.info(f"📊 Showing first 100 of {len(traffic_data)} AADT segments")
+            # Sort by most recent date (Year) as default - descending order for most recent first
+            df = df.sort_values(['Year', 'Data Timestamp'], ascending=[False, False])
+            
+            # Display paginated table with all data
+            self._display_paginated_data_table(df, "aadt_traffic")
         else:
             st.warning("No traffic data to display")
+    
+    def _display_paginated_data_table(self, df, table_key: str, 
+                                     items_per_page: int = 20) -> None:
+        """
+        Display paginated data table with navigation controls for traffic data
+        
+        Args:
+            df: DataFrame to display
+            table_key: Unique key for the table session state
+            items_per_page: Number of items to display per page
+        """
+        try:
+            if df.empty:
+                st.info("No data to display")
+                return
+            
+            # Initialize session state for pagination
+            page_key = f"{table_key}_page"
+            if page_key not in st.session_state:
+                st.session_state[page_key] = 0
+            
+            total_rows = len(df)
+            total_pages = (total_rows - 1) // items_per_page + 1
+            
+            # Pagination controls
+            if total_pages > 1:
+                col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+                
+                with col1:
+                    if st.button("⏪ First", key=f"{table_key}_first", 
+                               disabled=st.session_state[page_key] == 0):
+                        st.session_state[page_key] = 0
+                        st.rerun()
+                
+                with col2:
+                    if st.button("◀ Previous", key=f"{table_key}_prev", 
+                               disabled=st.session_state[page_key] == 0):
+                        st.session_state[page_key] -= 1
+                        st.rerun()
+                
+                with col3:
+                    st.write(f"Page {st.session_state[page_key] + 1} of {total_pages} "
+                            f"({total_rows:,} total records)")
+                
+                with col4:
+                    if st.button("Next ▶", key=f"{table_key}_next", 
+                               disabled=st.session_state[page_key] >= total_pages - 1):
+                        st.session_state[page_key] += 1
+                        st.rerun()
+                
+                with col5:
+                    if st.button("Last ⏩", key=f"{table_key}_last", 
+                               disabled=st.session_state[page_key] >= total_pages - 1):
+                        st.session_state[page_key] = total_pages - 1
+                        st.rerun()
+            
+            # Calculate start and end indices for current page
+            start_idx = st.session_state[page_key] * items_per_page
+            end_idx = min(start_idx + items_per_page, total_rows)
+            
+            # Display current page data
+            page_df = df.iloc[start_idx:end_idx]
+            
+            # Configure columns for better display
+            column_config = {
+                "AADT": st.column_config.NumberColumn(
+                    "AADT (Annual Average Daily Traffic)",
+                    help="Annual Average Daily Traffic volume",
+                    format="%d"
+                ),
+                "Year": st.column_config.NumberColumn(
+                    "Data Year",
+                    help="Year of the traffic data collection"
+                ),
+                "Traffic Level": st.column_config.TextColumn(
+                    "Traffic Level",
+                    help="Classification based on AADT volume"
+                )
+            }
+            
+            st.dataframe(
+                page_df, 
+                use_container_width=True,
+                height=400,
+                column_config=column_config
+            )
+            
+            # Show items count for current page
+            if total_pages > 1:
+                st.caption(f"Showing items {start_idx + 1}-{end_idx} of {total_rows} "
+                          f"(sorted by most recent data)")
+            else:
+                st.caption(f"Showing all {total_rows} records (sorted by most recent data)")
+            
+        except Exception as e:
+            logger.error(f"Error displaying paginated traffic table: {e}")
+            st.error("Error displaying table data")
     
     def _create_traffic_filters(self, traffic_data: TrafficCollection) -> Dict:
         """Create traffic data filter controls"""

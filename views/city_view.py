@@ -100,35 +100,21 @@ class CityView:
                 st.sidebar.warning("No city data available")
                 return
             
-            # Display the data in sidebar
-            st.sidebar.subheader("📋 City Data and Statistics")
-            
-            # Convert to DataFrame for display
-            df = cities.to_dataframe()
-            st.sidebar.dataframe(df, use_container_width=True)
-            
-            # Show summary statistics in sidebar
-            self._display_sidebar_statistics(cities)
+            # Removed "📋 City Data and Statistics" section as requested
+            # This method is kept for compatibility but no longer displays sidebar data
             
         except Exception as e:
             logger.error(f"Error displaying city data in sidebar: {e}")
             st.sidebar.error("Error displaying city data")
     
     def _display_sidebar_statistics(self, cities: CityCollection) -> None:
-        """Display summary statistics in sidebar"""
-        st.sidebar.subheader("Summary Statistics")
-        
-        total_cities = len(cities)
-        total_population = cities.get_total_population()
-        avg_population = cities.get_average_population()
-        
-        st.sidebar.metric("Total Cities", total_cities)
-        st.sidebar.metric("Total Population", f"{total_population:,}")
-        st.sidebar.metric("Average Population", f"{avg_population:,.0f}")
+        """Display summary statistics in sidebar - REMOVED as requested"""
+        # This method is kept for compatibility but no longer displays statistics
+        pass
     
     def display_city_data_main(self, cities: CityCollection, filters: Optional[Dict] = None) -> None:
         """
-        Display city data in the main content area with filters
+        Display city data in the main content area with filters and pagination
         
         Args:
             cities: Collection of cities to display
@@ -149,31 +135,19 @@ class CityView:
             # Convert to DataFrame for display
             df = cities.to_dataframe()
             
-            # Display the data
-            st.dataframe(df, use_container_width=True)
+            # Implement pagination for city data table
+            self._display_paginated_data_table(df, "city_data")
             
-            # Show summary statistics
-            self._display_main_statistics(cities)
+            # Summary Statistics section removed as requested
             
         except Exception as e:
             logger.error(f"Error displaying city data in main area: {e}")
             st.error("Error displaying city data")
     
     def _display_main_statistics(self, cities: CityCollection) -> None:
-        """Display summary statistics in main area"""
-        st.subheader("Summary Statistics")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Cities", len(cities))
-        
-        with col2:
-            total_population = cities.get_total_population()
-            st.metric("Total Population", f"{total_population:,}")
-        
-        with col3:
-            avg_population = cities.get_average_population()
-            st.metric("Average Population", f"{avg_population:,.0f}")
+        """Display summary statistics in main area - REMOVED as requested"""
+        # This method is kept for compatibility but no longer displays statistics
+        pass
     
     def create_filter_controls(self, cities: CityCollection) -> Dict:
         """
@@ -309,62 +283,85 @@ class CityView:
     
     def display_summary_statistics(self, cities: CityCollection) -> None:
         """
-        Display comprehensive summary statistics
+        Display comprehensive summary statistics - REMOVED as requested
         
         Args:
             cities: Collection of cities to analyze
         """
+        # This method is kept for compatibility but no longer displays summary statistics
+        # as requested by the user to remove "Summary Statistics" sections
+        pass
+    
+    def _display_paginated_data_table(self, df, table_key: str, 
+                                     items_per_page: int = 20) -> None:
+        """
+        Display paginated data table with navigation controls
+        
+        Args:
+            df: DataFrame to display
+            table_key: Unique key for the table session state
+            items_per_page: Number of items to display per page
+        """
         try:
-            if not cities or len(cities) == 0:
-                st.warning("No city data available for statistics")
+            if df.empty:
+                st.info("No data to display")
                 return
             
-            st.markdown("### 📋 Summary Statistics")
+            # Initialize session state for pagination
+            page_key = f"{table_key}_page"
+            if page_key not in st.session_state:
+                st.session_state[page_key] = 0
             
-            # Get statistics from controller
-            stats = self.city_controller.get_city_statistics(cities)
+            total_rows = len(df)
+            total_pages = (total_rows - 1) // items_per_page + 1
             
-            if not stats:
-                st.error("Unable to calculate statistics")
-                return
+            # Pagination controls
+            if total_pages > 1:
+                col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+                
+                with col1:
+                    if st.button("⏪ First", key=f"{table_key}_first", 
+                               disabled=st.session_state[page_key] == 0):
+                        st.session_state[page_key] = 0
+                        st.rerun()
+                
+                with col2:
+                    if st.button("◀ Previous", key=f"{table_key}_prev", 
+                               disabled=st.session_state[page_key] == 0):
+                        st.session_state[page_key] -= 1
+                        st.rerun()
+                
+                with col3:
+                    st.write(f"Page {st.session_state[page_key] + 1} of {total_pages} "
+                            f"({total_rows:,} total records)")
+                
+                with col4:
+                    if st.button("Next ▶", key=f"{table_key}_next", 
+                               disabled=st.session_state[page_key] >= total_pages - 1):
+                        st.session_state[page_key] += 1
+                        st.rerun()
+                
+                with col5:
+                    if st.button("Last ⏩", key=f"{table_key}_last", 
+                               disabled=st.session_state[page_key] >= total_pages - 1):
+                        st.session_state[page_key] = total_pages - 1
+                        st.rerun()
             
-            # Statistics grid
-            col1, col2, col3, col4 = st.columns(4)
+            # Calculate start and end indices for current page
+            start_idx = st.session_state[page_key] * items_per_page
+            end_idx = min(start_idx + items_per_page, total_rows)
             
-            with col1:
-                st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-                st.metric("🏙️ Total Cities", stats['total_cities'])
-                st.metric("👥 Total Population", f"{stats['total_population']:,}")
-                st.markdown('</div>', unsafe_allow_html=True)
+            # Display current page data
+            page_df = df.iloc[start_idx:end_idx]
+            st.dataframe(page_df, use_container_width=True, height=400)
             
-            with col2:
-                st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-                st.metric("📊 Average Population", f"{stats['average_population']:,.0f}")
-                st.metric("📍 Median Population", f"{stats['median_population']:,}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col3:
-                st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-                st.metric("🏞️ Total Land Area", f"{stats['total_land_area_km2']:.1f} km²")
-                st.metric("🌊 Total Water Area", f"{stats['total_water_area_km2']:.1f} km²")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            with col4:
-                st.markdown('<div class="metric-container">', unsafe_allow_html=True)
-                largest = stats['largest_city']
-                smallest = stats['smallest_city']
-                if largest:
-                    st.metric("🏆 Largest City", largest.name, f"{largest.population:,}")
-                if smallest:
-                    st.metric("🏘️ Smallest City", smallest.name, f"{smallest.population:,}")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Top cities showcase
-            self._display_top_cities_showcase(cities)
+            # Show items count for current page
+            if total_pages > 1:
+                st.caption(f"Showing items {start_idx + 1}-{end_idx} of {total_rows}")
             
         except Exception as e:
-            logger.error(f"Error displaying summary statistics: {e}")
-            st.error("Error calculating statistics")
+            logger.error(f"Error displaying paginated table: {e}")
+            st.error("Error displaying table data")
     
     def _display_top_cities_showcase(self, cities: CityCollection) -> None:
         """Display top cities in styled cards"""
