@@ -231,7 +231,7 @@ def add_florida_boundary_to_map(m: folium.Map) -> None:
             FLORIDA_BOUNDARY,
             style_function=lambda feature: {
                 'fillColor': 'transparent',
-                'color': '#1f77b4',
+                'color': '#ff0000',
                 'weight': 3,
                 'fillOpacity': 0.1,
                 'opacity': 0.8
