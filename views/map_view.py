@@ -209,7 +209,7 @@ class MapView:
         with col4:
             # Traffic data controls
             show_traffic_data = st.checkbox("🚦 Show Traffic", value=False, 
-                                           help="Display real-time traffic volume and speed data")
+                                           help="Display FDOT Annual Average Daily Traffic (AADT) data")
         
         # Initialize traffic options with default values
         traffic_options = {
@@ -229,8 +229,8 @@ class MapView:
             traffic_col1, traffic_col2, traffic_col3, traffic_col4 = st.columns(4)
             
             with traffic_col1:
-                show_heatmap = st.checkbox("🌡️ Volume Heatmap", value=False,
-                                         help="Show traffic volume as heatmap overlay")
+                show_heatmap = st.checkbox("🌡️ AADT Heatmap", value=False,
+                                         help="Show Annual Average Daily Traffic as heatmap overlay")
                 
                 traffic_level_filter = st.selectbox(
                     "📊 Traffic Level Filter",
@@ -265,7 +265,7 @@ class MapView:
                     st.metric("📍 Traffic Segments", stats.get('total_segments', 0))
                     st.metric("🚗 Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
                 else:
-                    st.info("👆 Enable traffic data above to load real-time traffic information")
+                    st.info("👆 Enable traffic data above to load FDOT AADT information")
             
             # Update traffic options
             traffic_options.update({
@@ -362,7 +362,7 @@ class MapView:
             TrafficCollection with traffic data or None if error
         """
         try:
-            with st.spinner("🚦 Loading real-time traffic data..."):
+            with st.spinner("🚦 Loading FDOT AADT data..."):
                 # Fetch traffic data
                 traffic_data = self.traffic_controller.fetch_and_cache_traffic_data(
                     county_filter=county_filter,
@@ -374,8 +374,8 @@ class MapView:
                 if traffic_data and len(traffic_data) > 0:
                     # Display success message with statistics
                     stats = self.traffic_controller.get_traffic_statistics(traffic_data)
-                    st.success(f"✅ Loaded {stats['total_segments']} traffic segments "
-                             f"(Avg Volume: {stats['avg_volume']:,.0f} vehicles)")
+                    st.success(f"✅ Loaded {stats['total_segments']} AADT segments "
+                             f"(Avg AADT: {stats['avg_volume']:,.0f} vehicles/day)")
                     
                     # Display traffic level breakdown
                     level_counts = stats['traffic_levels']
@@ -404,16 +404,16 @@ class MapView:
         Display traffic data analysis tab
         """
         try:
-            st.markdown("### 🚦 Real-Time Traffic Analysis")
+            st.markdown("### 🚦 FDOT AADT Traffic Analysis")
             
             # Get traffic data from session
             traffic_data = self.traffic_controller.get_session_traffic_data()
             
             if not traffic_data:
-                st.info("👆 Enable traffic data in the map view above to see traffic analysis")
+                st.info("👆 Enable traffic data in the map view above to see AADT analysis")
                 
                 # Option to fetch traffic data directly
-                if st.button("🚦 Load Traffic Data Now"):
+                if st.button("🚦 Load AADT Data Now"):
                     traffic_data = self._get_or_fetch_traffic_data()
                 
                 if not traffic_data:
@@ -427,8 +427,8 @@ class MapView:
                 stats = self.traffic_controller.get_traffic_statistics(traffic_data)
                 self._display_traffic_statistics(stats)
                 
-                # Traffic data table
-                st.markdown("#### 📊 Traffic Data Table")
+                # AADT data table
+                st.markdown("#### 📊 AADT Data Table")
                 self._display_traffic_data_table(traffic_data)
             
             with col2:
@@ -449,24 +449,24 @@ class MapView:
             st.error("❌ Error displaying traffic analysis")
     
     def _display_traffic_statistics(self, stats: Dict) -> None:
-        """Display traffic statistics overview"""
+        """Display AADT statistics overview"""
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.metric("🛣️ Total Segments", stats.get('total_segments', 0))
-            st.metric("🚗 Total Volume", f"{stats.get('total_volume', 0):,}")
+            st.metric("🚗 Total AADT", f"{stats.get('total_volume', 0):,}")
         
         with col2:
-            st.metric("⚡ Avg Speed", f"{stats.get('avg_speed', 0):.1f} mph")
-            st.metric("📈 Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
+            st.metric("📈 Avg AADT", f"{stats.get('avg_volume', 0):,.0f}")
+            traffic_levels = stats.get('traffic_levels', {})
+            st.metric("🔴 Heavy Traffic", traffic_levels.get('Heavy', 0))
         
         with col3:
-            congestion_stats = stats.get('congestion_stats', {})
-            st.metric("🔴 Congested", congestion_stats.get('congested_segments', 0))
-            st.metric("🟢 Free Flow", congestion_stats.get('free_flow_segments', 0))
+            st.metric("🟠 High Traffic", traffic_levels.get('High', 0))
+            st.metric("🟡 Moderate Traffic", traffic_levels.get('Moderate', 0))
         
         with col4:
-            st.metric("📊 Speed Ratio", f"{congestion_stats.get('avg_speed_ratio', 0):.2f}")
+            st.metric("🟢 Low Traffic", traffic_levels.get('Low', 0))
             if stats.get('last_updated'):
                 from datetime import datetime
                 try:
@@ -476,7 +476,7 @@ class MapView:
                     st.metric("🕒 Updated", "Recent")
     
     def _display_traffic_data_table(self, traffic_data: TrafficCollection) -> None:
-        """Display traffic data in tabular format"""
+        """Display AADT data in tabular format"""
         import pandas as pd
         
         # Convert traffic data to DataFrame
@@ -484,14 +484,15 @@ class MapView:
         for traffic in traffic_data.traffic_data[:100]:  # Limit to 100 rows for performance
             data_for_table.append({
                 'Roadway': traffic.roadway_name,
+                'From': traffic.desc_from,
+                'To': traffic.desc_to,
                 'County': traffic.county,
-                'Direction': traffic.direction,
-                'Volume': traffic.traffic_volume,
-                'Speed (mph)': traffic.average_speed,
-                'Speed Limit': traffic.speed_limit,
-                'Speed Ratio': f"{traffic.speed_ratio:.2f}",
+                'District': traffic.district,
+                'AADT': traffic.aadt,
+                'AADT Flag': traffic.aadt_flag,
                 'Traffic Level': traffic.get_traffic_level(),
-                'Time Interval': traffic.time_interval
+                'Year': traffic.year,
+                'Data Quality': traffic.data_quality
             })
         
         if data_for_table:
@@ -499,7 +500,7 @@ class MapView:
             st.dataframe(df, use_container_width=True, height=400)
             
             if len(traffic_data) > 100:
-                st.info(f"📊 Showing first 100 of {len(traffic_data)} traffic segments")
+                st.info(f"📊 Showing first 100 of {len(traffic_data)} AADT segments")
         else:
             st.warning("No traffic data to display")
     
@@ -562,7 +563,7 @@ class MapView:
     
     def _display_traffic_data_info(self, traffic_data: TrafficCollection) -> None:
         """Display traffic data information and metadata"""
-        st.info(f"📊 **Data Source:** FDOT Real-Time Traffic")
+        st.info(f"📊 **Data Source:** FDOT Annual Average Daily Traffic (AADT)")
         st.info(f"🔢 **Total Segments:** {len(traffic_data)}")
         
         if traffic_data.last_updated:

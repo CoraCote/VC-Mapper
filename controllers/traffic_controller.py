@@ -1,5 +1,5 @@
 """
-Traffic Controller - Handles fetching and managing real-time traffic data from ArcGIS services
+Traffic Controller - Handles fetching and managing FDOT Annual Average Daily Traffic (AADT) data
 """
 
 import requests
@@ -16,12 +16,12 @@ logger = logging.getLogger(__name__)
 
 class TrafficController:
     """
-    Controller for managing real-time traffic volume and speed data from ArcGIS services
+    Controller for managing FDOT Annual Average Daily Traffic (AADT) data from FDOT GIS services
     """
     
     def __init__(self):
-        """Initialize the traffic controller with ArcGIS service configuration"""
-        self.base_url = "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Real_Time_Traffic_Volume_and_Speed_All_Intervals_All_Directions_TDA/FeatureServer/0/query"
+        """Initialize the traffic controller with FDOT AADT service configuration"""
+        self.base_url = "https://services.arcgis.com/V6ZHFr6zdgNZuVG0/ArcGIS/rest/services/Florida_Annual_Average_Daily_Traffic/FeatureServer/0/query"
         self.default_params = {
             'outFields': '*',
             'where': '1=1',
@@ -38,16 +38,16 @@ class TrafficController:
                           max_records: int = 1000,
                           use_cache: bool = True) -> Optional[TrafficCollection]:
         """
-        Fetch real-time traffic data from ArcGIS service
+        Fetch FDOT Annual Average Daily Traffic (AADT) data from FDOT GIS service
         
         Args:
             county_filter: Optional county name to filter results
-            roadway_filter: Optional roadway name to filter results  
+            roadway_filter: Optional roadway description to filter results  
             max_records: Maximum number of records to fetch
             use_cache: Whether to use cached data if available
             
         Returns:
-            TrafficCollection with fetched data or None if error
+            TrafficCollection with fetched AADT data or None if error
         """
         try:
             # Check cache first
@@ -66,18 +66,19 @@ class TrafficController:
                 where_clauses.append(f"COUNTY LIKE '%{county_filter}%'")
             
             if roadway_filter:
-                where_clauses.append(f"ROADWAY_NAME LIKE '%{roadway_filter}%'")
+                # Filter on both description fields for better coverage
+                where_clauses.append(f"(DESC_FRM LIKE '%{roadway_filter}%' OR DESC_TO LIKE '%{roadway_filter}%')")
             
             params['where'] = ' AND '.join(where_clauses)
             
-            logger.info(f"Fetching traffic data with params: {params}")
+            logger.info(f"Fetching FDOT AADT data with params: {params}")
             
             # Make API request with timeout and error handling
             response = requests.get(
                 self.base_url, 
                 params=params, 
                 timeout=30,
-                headers={'User-Agent': 'FDOT-Traffic-Explorer/1.0'}
+                headers={'User-Agent': 'VC-Mapper-FDOT-AADT/1.0'}
             )
             
             response.raise_for_status()
@@ -110,13 +111,13 @@ class TrafficController:
     
     def _parse_traffic_response(self, data: Dict[str, Any]) -> TrafficCollection:
         """
-        Parse ArcGIS API response into TrafficCollection
+        Parse FDOT GIS API response into TrafficCollection
         
         Args:
-            data: Raw response data from ArcGIS API
+            data: Raw GeoJSON response data from FDOT GIS API
             
         Returns:
-            TrafficCollection with parsed data
+            TrafficCollection with parsed AADT data
         """
         traffic_collection = TrafficCollection()
         
@@ -192,7 +193,7 @@ class TrafficController:
         base_stats = traffic_collection.get_statistics()
         
         # Additional statistics
-        volumes = [data.traffic_volume for data in traffic_collection.traffic_data]
+        volumes = [data.aadt for data in traffic_collection.traffic_data]
         speeds = [data.average_speed for data in traffic_collection.traffic_data]
         speed_ratios = [data.speed_ratio for data in traffic_collection.traffic_data]
         
@@ -304,9 +305,12 @@ class TrafficController:
                 if traffic_data.county.lower() != filters['county'].lower():
                     include = False
             
-            # Roadway filter
+            # Roadway filter (check both description fields)
             if filters.get('roadway') and filters['roadway'] != 'All':
-                if filters['roadway'].lower() not in traffic_data.roadway_name.lower():
+                roadway_match = (filters['roadway'].lower() in traffic_data.roadway_name.lower() or
+                               filters['roadway'].lower() in traffic_data.desc_from.lower() or
+                               filters['roadway'].lower() in traffic_data.desc_to.lower())
+                if not roadway_match:
                     include = False
             
             # Traffic level filter
@@ -314,13 +318,13 @@ class TrafficController:
                 if traffic_data.get_traffic_level() != filters['traffic_level']:
                     include = False
             
-            # Volume range filter
+            # AADT volume range filter
             if filters.get('min_volume') is not None:
-                if traffic_data.traffic_volume < filters['min_volume']:
+                if traffic_data.aadt < filters['min_volume']:
                     include = False
             
             if filters.get('max_volume') is not None:
-                if traffic_data.traffic_volume > filters['max_volume']:
+                if traffic_data.aadt > filters['max_volume']:
                     include = False
             
             # Speed ratio filter

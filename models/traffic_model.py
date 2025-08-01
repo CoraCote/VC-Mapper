@@ -17,45 +17,76 @@ class TrafficData:
     
     def __init__(self, data: Dict[str, Any]):
         """
-        Initialize traffic data from ArcGIS feature properties
+        Initialize traffic data from FDOT AADT GeoJSON feature
         
         Args:
-            data: Dictionary containing traffic data from ArcGIS API
+            data: Dictionary containing traffic data from FDOT API (GeoJSON Feature format)
         """
-        # Extract properties from ArcGIS response
+        # Extract properties from GeoJSON response
         properties = data.get('properties', {})
         geometry = data.get('geometry', {})
         
         # Basic identification
-        self.objectid = properties.get('OBJECTID')
-        self.segment_id = properties.get('SEGMENT_ID')
-        self.roadway_name = properties.get('ROADWAY_NAME', 'Unknown')
+        self.fid = properties.get('FID')
+        self.objectid = self.fid  # For backward compatibility
+        self.segment_id = f"{properties.get('ROADWAY', '')}-{properties.get('BEGIN_POST', 0)}-{properties.get('END_POST', 0)}"
+        self.roadway_code = properties.get('ROADWAY', 'Unknown')
+        self.roadway_name = f"{properties.get('DESC_FRM', '')} to {properties.get('DESC_TO', '')}"
         
-        # Traffic volume data
-        self.traffic_volume = properties.get('TRAFFIC_VOLUME', 0)
-        self.volume_category = properties.get('VOLUME_CATEGORY', 'Unknown')
-        
-        # Speed data
-        self.speed_limit = properties.get('SPEED_LIMIT', 0)
-        self.average_speed = properties.get('AVERAGE_SPEED', 0)
-        self.speed_ratio = properties.get('SPEED_RATIO', 0.0)
-        
-        # Time and direction information
-        self.direction = properties.get('DIRECTION', 'Unknown')
-        self.time_interval = properties.get('TIME_INTERVAL', 'Unknown')
-        self.data_timestamp = properties.get('DATA_TIMESTAMP')
-        
-        # Location and geometry
-        self.county = properties.get('COUNTY', 'Unknown')
+        # FDOT specific fields
+        self.year = properties.get('YEAR_', 2024)
         self.district = properties.get('DISTRICT', 'Unknown')
+        self.cosite = properties.get('COSITE', 'Unknown')
+        self.desc_from = properties.get('DESC_FRM', 'Unknown')
+        self.desc_to = properties.get('DESC_TO', 'Unknown')
+        
+        # Traffic volume data (AADT = Annual Average Daily Traffic)
+        self.aadt = properties.get('AADT', 0)
+        self.traffic_volume = self.aadt  # For backward compatibility
+        self.aadt_flag = properties.get('AADTFLG', 'Unknown')
+        
+        # Factor data for traffic analysis
+        self.k_factor = properties.get('KFCTR', 0)  # Design hour factor
+        self.k100_factor = properties.get('K100FCTR', 0)  # 100th hour factor
+        self.d_factor = properties.get('DFCTR', 0)  # Directional factor
+        self.t_factor = properties.get('TFCTR', 0)  # Truck factor
+        
+        # Flags for data quality
+        self.k_flag = properties.get('KFLG', 'Unknown')
+        self.k100_flag = properties.get('K100FLG', 'Unknown') 
+        self.d_flag = properties.get('DFLG', 'Unknown')
+        self.t_flag = properties.get('TFLG', 'Unknown')
+        
+        # Location information  
+        self.county_dot = properties.get('COUNTYDOT', 'Unknown')
+        self.county = properties.get('COUNTY', 'Unknown')
+        self.mng_district = properties.get('MNG_DIST', 'Unknown')
+        
+        # Additional FDOT service fields that may not be in user's sample
+        self.truck_per = properties.get('TRUCK_PER', 0)  # % of truck traffic per day
+        self.tfctr_copy = properties.get('TFCTR_copy', 0)  # % truck volume per day
+        
+        # Milepost information
+        self.begin_post = properties.get('BEGIN_POST', 0)
+        self.end_post = properties.get('END_POST', 0)
+        
+        # Geometry and shape
         self.geometry = geometry
+        self.shape_length = properties.get('Shape_Leng', 0)
         
         # Coordinates (extracted from geometry)
         self.coordinates = self._extract_coordinates(geometry)
         
-        # Quality indicators
-        self.data_quality = properties.get('DATA_QUALITY', 'Unknown')
-        self.confidence_level = properties.get('CONFIDENCE_LEVEL', 0)
+        # Calculated fields for compatibility with existing code
+        self.speed_limit = 0  # Not available in AADT data
+        self.average_speed = 0  # Not available in AADT data  
+        self.speed_ratio = 1.0  # Default to free flow
+        self.direction = 'Both'  # AADT is typically bidirectional
+        self.time_interval = 'Annual'
+        self.data_timestamp = f"{self.year}-01-01"
+        self.volume_category = self._categorize_aadt_volume()
+        self.data_quality = self._determine_data_quality()
+        self.confidence_level = self._calculate_confidence_level()
     
     def _extract_coordinates(self, geometry: Dict[str, Any]) -> Optional[List[List[float]]]:
         """
@@ -101,21 +132,80 @@ class TrafficData:
             return tuple(self.coordinates[mid_idx])
         return None
     
+    def _categorize_aadt_volume(self) -> str:
+        """
+        Categorize AADT volume into descriptive categories
+        
+        Returns:
+            Volume category based on AADT value
+        """
+        if self.aadt >= 50000:
+            return "Very High"
+        elif self.aadt >= 25000:
+            return "High"
+        elif self.aadt >= 10000:
+            return "Moderate"
+        elif self.aadt >= 5000:
+            return "Low"
+        else:
+            return "Very Low"
+    
+    def _determine_data_quality(self) -> str:
+        """
+        Determine data quality based on FDOT flags
+        
+        Returns:
+            Data quality indicator
+        """
+        # Check if any critical flags indicate issues
+        problem_flags = ['E', 'P', 'Q']  # Error, Projected, Quality issue flags
+        
+        flags_to_check = [self.aadt_flag, self.k_flag, self.d_flag, self.t_flag]
+        
+        if any(flag in problem_flags for flag in flags_to_check if flag):
+            return "Questionable"
+        elif all(flag == 'C' for flag in flags_to_check if flag):  # 'C' typically means counted/actual
+            return "Good"
+        else:
+            return "Fair"
+    
+    def _calculate_confidence_level(self) -> int:
+        """
+        Calculate confidence level based on data quality and flags
+        
+        Returns:
+            Confidence level from 0-100
+        """
+        confidence = 100
+        
+        # Reduce confidence based on flags
+        if self.aadt_flag in ['E', 'P']:
+            confidence -= 30
+        elif self.aadt_flag in ['Q']:
+            confidence -= 15
+        
+        # Factor in other quality indicators
+        quality_flags = [self.k_flag, self.d_flag, self.t_flag]
+        problem_count = sum(1 for flag in quality_flags if flag in ['E', 'P', 'Q'])
+        confidence -= problem_count * 10
+        
+        return max(0, min(100, confidence))
+    
     def get_traffic_level(self) -> str:
         """
-        Categorize traffic level based on volume and speed ratio
+        Categorize traffic level based on AADT volume
         
         Returns:
             Traffic level category (Low, Moderate, High, Heavy)
         """
-        if self.speed_ratio >= 0.8:
-            return "Low"
-        elif self.speed_ratio >= 0.6:
-            return "Moderate"
-        elif self.speed_ratio >= 0.4:
-            return "High"
-        else:
+        if self.aadt >= 40000:
             return "Heavy"
+        elif self.aadt >= 20000:
+            return "High"
+        elif self.aadt >= 8000:
+            return "Moderate"
+        else:
+            return "Low"
     
     def get_color_by_traffic_level(self) -> List[int]:
         """
@@ -137,18 +227,18 @@ class TrafficData:
     
     def get_line_width_by_volume(self) -> int:
         """
-        Get line width based on traffic volume
+        Get line width based on AADT traffic volume
         
         Returns:
             Line width for map visualization
         """
-        if self.traffic_volume >= 50000:
+        if self.aadt >= 50000:
             return 8
-        elif self.traffic_volume >= 30000:
+        elif self.aadt >= 30000:
             return 6
-        elif self.traffic_volume >= 15000:
+        elif self.aadt >= 15000:
             return 4
-        elif self.traffic_volume >= 5000:
+        elif self.aadt >= 5000:
             return 3
         else:
             return 2
@@ -156,20 +246,62 @@ class TrafficData:
     def to_dict(self) -> Dict[str, Any]:
         """Convert traffic data to dictionary format"""
         return {
+            # Basic identification
+            'fid': self.fid,
             'objectid': self.objectid,
             'segment_id': self.segment_id,
+            'roadway_code': self.roadway_code,
             'roadway_name': self.roadway_name,
+            
+            # FDOT specific fields
+            'year': self.year,
+            'district': self.district,
+            'cosite': self.cosite,
+            'desc_from': self.desc_from,
+            'desc_to': self.desc_to,
+            
+            # Traffic volume data
+            'aadt': self.aadt,
             'traffic_volume': self.traffic_volume,
+            'aadt_flag': self.aadt_flag,
             'volume_category': self.volume_category,
+            
+            # Traffic factors
+            'k_factor': self.k_factor,
+            'k100_factor': self.k100_factor,
+            'd_factor': self.d_factor,
+            't_factor': self.t_factor,
+            
+            # Quality flags
+            'k_flag': self.k_flag,
+            'k100_flag': self.k100_flag,
+            'd_flag': self.d_flag,
+            't_flag': self.t_flag,
+            
+            # Location information
+            'county_dot': self.county_dot,
+            'county': self.county,
+            'mng_district': self.mng_district,
+            
+            # Milepost information
+            'begin_post': self.begin_post,
+            'end_post': self.end_post,
+            
+            # Additional FDOT service fields
+            'truck_per': self.truck_per,
+            'tfctr_copy': self.tfctr_copy,
+            
+            # Geometry
+            'shape_length': self.shape_length,
+            'coordinates': self.coordinates,
+            
+            # Derived/compatibility fields
             'speed_limit': self.speed_limit,
             'average_speed': self.average_speed,
             'speed_ratio': self.speed_ratio,
             'direction': self.direction,
             'time_interval': self.time_interval,
             'data_timestamp': self.data_timestamp,
-            'county': self.county,
-            'district': self.district,
-            'coordinates': self.coordinates,
             'traffic_level': self.get_traffic_level(),
             'data_quality': self.data_quality,
             'confidence_level': self.confidence_level
@@ -178,8 +310,8 @@ class TrafficData:
     def __str__(self) -> str:
         """String representation of traffic data"""
         return (f"TrafficData(roadway={self.roadway_name}, "
-                f"volume={self.traffic_volume}, "
-                f"avg_speed={self.average_speed}, "
+                f"aadt={self.aadt}, "
+                f"county={self.county}, "
                 f"level={self.get_traffic_level()})")
 
 
@@ -244,15 +376,15 @@ class TrafficCollection:
     
     def get_high_traffic_segments(self, threshold: int = 30000) -> List[TrafficData]:
         """
-        Get segments with high traffic volume
+        Get segments with high AADT traffic volume
         
         Args:
-            threshold: Volume threshold for high traffic
+            threshold: AADT threshold for high traffic
             
         Returns:
             List of high traffic segments
         """
-        return [data for data in self.traffic_data if data.traffic_volume >= threshold]
+        return [data for data in self.traffic_data if data.aadt >= threshold]
     
     def get_congested_segments(self, speed_ratio_threshold: float = 0.5) -> List[TrafficData]:
         """
@@ -281,7 +413,7 @@ class TrafficCollection:
                 'traffic_levels': {'Low': 0, 'Moderate': 0, 'High': 0, 'Heavy': 0}
             }
         
-        total_volume = sum(data.traffic_volume for data in self.traffic_data)
+        total_volume = sum(data.aadt for data in self.traffic_data)
         total_speed = sum(data.average_speed for data in self.traffic_data)
         
         # Count traffic levels
