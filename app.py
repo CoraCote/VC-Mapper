@@ -7,6 +7,8 @@ from streamlit_folium import st_folium
 import plotly.express as px
 import plotly.graph_objects as go
 from fdot_api import FDOTGISAPI
+import requests
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -14,6 +16,277 @@ logger = logging.getLogger(__name__)
 
 # Initialize the FDOT GIS API client
 fdot_api = FDOTGISAPI()
+
+# Florida state boundary GeoJSON (simplified coordinates)
+FLORIDA_BOUNDARY = {
+    "type": "FeatureCollection",
+    "features": [{
+        "type": "Feature",
+        "properties": {"name": "Florida"},
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[
+                [-87.634896, 30.997536],  # Northwest corner
+                [-87.427917, 30.997536], 
+                [-86.913892, 30.997536],
+                [-85.497137, 30.997536],
+                [-84.319447, 30.676609],
+                [-82.879938, 30.564875],
+                [-82.190083, 30.564875],
+                [-81.24069, 30.564875],
+                [-80.915156, 31.068903],
+                [-80.565487, 31.068903],
+                [-80.381653, 30.997536],
+                [-80.08183, 30.997536],
+                [-80.031983, 30.564875],
+                [-80.031983, 29.229735],
+                [-80.031983, 28.128005],
+                [-80.031983, 26.994637],
+                [-80.031983, 25.729595],
+                [-80.218695, 25.204941],
+                [-80.748177, 25.204941],
+                [-81.092673, 24.411089],
+                [-81.755371, 24.411089],
+                [-82.650513, 24.568745],
+                [-83.351287, 25.204941],
+                [-84.02832, 25.573047],
+                [-84.319447, 25.573047],
+                [-85.064697, 25.890106],
+                [-85.872803, 26.994637],
+                [-86.462402, 28.128005],
+                [-87.017822, 28.902305],
+                [-87.459717, 29.675867],
+                [-87.634896, 30.997536]   # Closing coordinate
+            ]]
+        }
+    }]
+}
+
+def get_overpass_streets(bbox: List[float], city_name: str = "") -> List[Dict]:
+    """
+    Get street data from OpenStreetMap Overpass API within a bounding box
+    
+    Args:
+        bbox: [south, west, north, east] bounding box coordinates
+        city_name: Name of the city for filtering (optional)
+    
+    Returns:
+        List of street dictionaries with geometry and properties
+    """
+    try:
+        overpass_url = "http://overpass-api.de/api/interpreter"
+        
+        # Build Overpass query for streets (highways)
+        query = f"""
+        [out:json][timeout:25];
+        (
+          way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+        );
+        out geom;
+        """
+        
+        response = requests.get(overpass_url, params={'data': query}, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        streets = []
+        
+        for element in data.get('elements', []):
+            if element.get('type') == 'way' and 'geometry' in element:
+                # Convert OSM geometry to standard format
+                coords = []
+                for node in element['geometry']:
+                    coords.append([node['lon'], node['lat']])
+                
+                street_data = {
+                    'street_id': element.get('id'),
+                    'street_name': element.get('tags', {}).get('name', 'Unnamed Street'),
+                    'highway_type': element.get('tags', {}).get('highway', 'unknown'),
+                    'geometry': {
+                        'type': 'LineString',
+                        'coordinates': coords
+                    },
+                    'lanes': element.get('tags', {}).get('lanes'),
+                    'maxspeed': element.get('tags', {}).get('maxspeed'),
+                    'surface': element.get('tags', {}).get('surface'),
+                    'raw_tags': element.get('tags', {})
+                }
+                streets.append(street_data)
+        
+        logger.info(f"Retrieved {len(streets)} streets from OpenStreetMap for {city_name or 'specified area'}")
+        return streets
+        
+    except Exception as e:
+        logger.error(f"Error fetching streets from OpenStreetMap: {e}")
+        return []
+
+def get_alternative_street_data(lat: float, lon: float, city_name: str = "") -> List[Dict]:
+    """
+    Try multiple methods to get street data for a city
+    
+    Args:
+        lat: Latitude of the city center
+        lon: Longitude of the city center  
+        city_name: Name of the city
+    
+    Returns:
+        List of street dictionaries
+    """
+    streets = []
+    
+    # Method 1: OpenStreetMap Overpass API with larger bounding box
+    try:
+        bbox_size = 0.02  # Start with smaller area
+        bbox = [lat - bbox_size, lon - bbox_size, lat + bbox_size, lon + bbox_size]
+        streets = get_overpass_streets(bbox, city_name)
+        
+        if streets:
+            logger.info(f"Retrieved {len(streets)} streets using OpenStreetMap Overpass API")
+            return streets
+    except Exception as e:
+        logger.error(f"OpenStreetMap method failed: {e}")
+    
+    # Method 2: Try larger bounding box
+    try:
+        bbox_size = 0.05  # Larger area
+        bbox = [lat - bbox_size, lon - bbox_size, lat + bbox_size, lon + bbox_size]
+        streets = get_overpass_streets(bbox, city_name)
+        
+        if streets:
+            logger.info(f"Retrieved {len(streets)} streets using larger OpenStreetMap area")
+            return streets
+    except Exception as e:
+        logger.error(f"Larger OpenStreetMap area method failed: {e}")
+    
+    # Method 3: Try alternative Overpass servers
+    try:
+        overpass_urls = [
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass-api.de/api/interpreter",
+            "https://z.overpass-api.de/api/interpreter"
+        ]
+        
+        bbox_size = 0.03
+        bbox = [lat - bbox_size, lon - bbox_size, lat + bbox_size, lon + bbox_size]
+        
+        for overpass_url in overpass_urls:
+            try:
+                query = f"""
+                [out:json][timeout:30];
+                (
+                  way["highway"]({bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]});
+                );
+                out geom;
+                """
+                
+                response = requests.get(overpass_url, params={'data': query}, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                for element in data.get('elements', []):
+                    if element.get('type') == 'way' and 'geometry' in element:
+                        coords = []
+                        for node in element['geometry']:
+                            coords.append([node['lon'], node['lat']])
+                        
+                        street_data = {
+                            'street_id': element.get('id'),
+                            'street_name': element.get('tags', {}).get('name', 'Unnamed Street'),
+                            'highway_type': element.get('tags', {}).get('highway', 'road'),
+                            'geometry': {
+                                'type': 'LineString',
+                                'coordinates': coords
+                            },
+                            'lanes': element.get('tags', {}).get('lanes'),
+                            'maxspeed': element.get('tags', {}).get('maxspeed'),
+                            'surface': element.get('tags', {}).get('surface'),
+                            'raw_tags': element.get('tags', {})
+                        }
+                        streets.append(street_data)
+                
+                if streets:
+                    logger.info(f"Retrieved {len(streets)} streets using alternative Overpass server: {overpass_url}")
+                    return streets
+                    
+            except Exception as server_error:
+                logger.warning(f"Failed with server {overpass_url}: {server_error}")
+                continue
+                
+    except Exception as e:
+        logger.error(f"Alternative servers method failed: {e}")
+    
+    logger.warning(f"Could not retrieve street data for {city_name} using any method")
+    return []
+
+def add_florida_boundary_to_map(m: folium.Map) -> None:
+    """
+    Add Florida state boundary to the map
+    
+    Args:
+        m: Folium map object
+    """
+    try:
+        folium.GeoJson(
+            FLORIDA_BOUNDARY,
+            style_function=lambda feature: {
+                'fillColor': 'transparent',
+                'color': '#1f77b4',
+                'weight': 3,
+                'fillOpacity': 0.1,
+                'opacity': 0.8
+            },
+            popup=folium.Popup("State of Florida", max_width=200),
+            tooltip="Florida State Boundary"
+        ).add_to(m)
+        
+        logger.info("Added Florida state boundary to map")
+        
+    except Exception as e:
+        logger.error(f"Error adding Florida boundary to map: {e}")
+
+def display_florida_only_map() -> None:
+    """
+    Display a map showing only the Florida state boundary
+    """
+    # Center on Florida
+    center_lat, center_lon = 27.8333, -81.717
+    zoom_level = 7
+    
+    # Create folium map with modern styling
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=zoom_level,
+        tiles=None
+    )
+    
+    # Add multiple tile layers
+    folium.TileLayer('OpenStreetMap', name='Street Map').add_to(m)
+    folium.TileLayer(
+        tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr='Esri',
+        name='Satellite',
+        overlay=False,
+        control=True
+    ).add_to(m)
+    folium.TileLayer(
+        tiles='CartoDB positron',
+        name='Light Mode',
+        attr='CartoDB'
+    ).add_to(m)
+    
+    # Add Florida state boundary
+    add_florida_boundary_to_map(m)
+    
+    # Add layer control
+    folium.LayerControl().add_to(m)
+    
+    # Display the map
+    with st.container():
+        st.markdown('<div class="map-container">', unsafe_allow_html=True)
+        st.info("📍 Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
+        st_folium(m, width=None, height=600)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # Custom CSS for better styling
 def load_css():
@@ -149,20 +422,35 @@ def display_city_data_sidebar(cities: List[Dict]) -> None:
     st.sidebar.metric("Total Population", f"{total_population:,}")
     st.sidebar.metric("Average Population", f"{avg_population:,.0f}")
 
-def add_city_boundary_to_map(m: folium.Map, city_data: Dict, boundary_data: Dict) -> None:
+def add_city_boundary_to_map(m: folium.Map, city_data: Dict, boundary_data: Dict, is_selected: bool = False) -> None:
     """
-    Add city boundary to the map
+    Add city boundary to the map with enhanced styling for selected city
     
     Args:
         m: Folium map object
         city_data: City information
         boundary_data: Boundary geometry data
+        is_selected: Whether this is the selected city (for enhanced styling)
     """
     try:
         geometry = boundary_data.get('geometry', {})
         if not geometry:
             logger.warning(f"No geometry data for city {city_data.get('name', 'Unknown')}")
             return
+        
+        # Different styling for selected vs regular cities
+        if is_selected:
+            color = '#FF6B35'  # Orange for selected city
+            weight = 4
+            fillColor = '#FF6B35'
+            fillOpacity = 0.3
+            dash_array = None
+        else:
+            color = '#4A90E2'  # Blue for other cities
+            weight = 2
+            fillColor = '#4A90E2'
+            fillOpacity = 0.1
+            dash_array = '10,10'
         
         # Convert geometry to GeoJSON format for folium
         if geometry.get('type') == 'Polygon':
@@ -174,98 +462,138 @@ def add_city_boundary_to_map(m: folium.Map, city_data: Dict, boundary_data: Dict
                     ring_coords = [[coord[1], coord[0]] for coord in ring]  # Swap x,y to lat,lng
                     folium_coords.append(ring_coords)
                 
-                # Add polygon to map
-                folium.Polygon(
-                    locations=folium_coords,
-                    popup=f"<b>{city_data.get('name', 'Unknown')}</b><br/>City Boundary",
-                    tooltip=f"City: {city_data.get('name', 'Unknown')}",
-                    color='blue',
-                    weight=2,
-                    fillColor='lightblue',
-                    fillOpacity=0.2
-                ).add_to(m)
+                # Enhanced popup for selected city
+                popup_content = f"""
+                <div style="font-family: Arial, sans-serif; width: 200px;">
+                    <h4 style="margin: 0 0 8px 0; color: {'#FF6B35' if is_selected else '#4A90E2'};">
+                        {'🎯 ' if is_selected else '🏢 '}{city_data.get('name', 'Unknown')}
+                    </h4>
+                    <p style="margin: 2px 0;"><strong>Status:</strong> {'Selected City' if is_selected else 'City Boundary'}</p>
+                    <p style="margin: 2px 0;"><strong>Population:</strong> {city_data.get('population', 0):,}</p>
+                    <p style="margin: 2px 0;"><strong>GEOID:</strong> {city_data.get('geoid', 'N/A')}</p>
+                </div>
+                """
                 
-                logger.info(f"Added boundary for city {city_data.get('name', 'Unknown')}")
+                # Add polygon to map
+                polygon = folium.Polygon(
+                    locations=folium_coords,
+                    popup=folium.Popup(popup_content, max_width=250),
+                    tooltip=f"{'🎯 Selected: ' if is_selected else '🏢 '}{city_data.get('name', 'Unknown')}",
+                    color=color,
+                    weight=weight,
+                    fillColor=fillColor,
+                    fillOpacity=fillOpacity,
+                    dashArray=dash_array
+                )
+                polygon.add_to(m)
+                
+                logger.info(f"Added {'highlighted' if is_selected else 'regular'} boundary for city {city_data.get('name', 'Unknown')}")
         
     except Exception as e:
         logger.error(f"Error adding city boundary to map: {e}")
 
-def add_streets_to_map(m: folium.Map, streets: List[Dict], show_traffic: bool = True) -> None:
+def add_streets_to_map(m: folium.Map, streets: List[Dict], show_traffic: bool = True, city_selected: bool = False) -> None:
     """
-    Add street data to the map with traffic visualization
+    Add street data to the map with traffic visualization or city highlighting
     
     Args:
         m: Folium map object
         streets: List of street data
         show_traffic: Whether to show traffic-based coloring
+        city_selected: Whether this is for a selected city (use blue highlighting)
     """
     try:
         if not streets:
             return
         
-        # Create feature groups for different traffic levels
-        traffic_groups = {
-            'very_high': folium.FeatureGroup(name='🔴 Very High Traffic'),
-            'high': folium.FeatureGroup(name='🟠 High Traffic'),
-            'medium': folium.FeatureGroup(name='🟡 Medium Traffic'),
-            'low': folium.FeatureGroup(name='🟢 Low Traffic'),
-            'very_low': folium.FeatureGroup(name='🔵 Very Low Traffic'),
-            'unknown': folium.FeatureGroup(name='⚪ Unknown Traffic')
-        }
-        
-        # Add each feature group to map
-        for group in traffic_groups.values():
-            group.add_to(m)
-        
-        for street in streets:
-            geometry = street.get('geometry', {})
-            if not geometry:
-                continue
+        if city_selected:
+            # For selected city, highlight streets in blue
+            street_group = folium.FeatureGroup(name='🔵 City Streets').add_to(m)
             
-            # Get traffic level and color
-            traffic_level = street.get('traffic_level', 'unknown')
-            traffic_color = fdot_api.get_traffic_color(traffic_level) if show_traffic else '#0074D9'
-            
-            # Create popup with street information
-            popup_html = f"""
-            <div style="font-family: Arial, sans-serif; width: 250px;">
-                <h4 style="margin: 0 0 8px 0; color: #333;">{street.get('street_name', 'Unknown Street')}</h4>
-                <p style="margin: 2px 0;"><strong>Road Number:</strong> {street.get('road_number', 'N/A')}</p>
-                <p style="margin: 2px 0;"><strong>Traffic Volume:</strong> {street.get('traffic_volume', 0):,}/day</p>
-                <p style="margin: 2px 0;"><strong>Traffic Level:</strong> {traffic_level.replace('_', ' ').title()}</p>
-                <p style="margin: 2px 0;"><strong>Length:</strong> {street.get('length', 0):.2f} units</p>
-                <p style="margin: 2px 0;"><strong>Lanes:</strong> {street.get('lane_count', 'N/A')}</p>
-                <p style="margin: 2px 0;"><strong>Speed Limit:</strong> {street.get('speed_limit', 'N/A')} mph</p>
-                <p style="margin: 2px 0;"><strong>County:</strong> {street.get('county', 'N/A')}</p>
-            </div>
-            """
-            
-            # Handle different geometry types
-            if geometry.get('type') == 'LineString':
-                coordinates = geometry.get('coordinates', [])
-                if coordinates:
-                    # Convert coordinates to lat/lng format
-                    folium_coords = [[coord[1], coord[0]] for coord in coordinates]
-                    
-                    # Create polyline
-                    line = folium.PolyLine(
-                        locations=folium_coords,
-                        popup=folium.Popup(popup_html, max_width=300),
-                        tooltip=f"{street.get('street_name', 'Unknown')} - {traffic_level.replace('_', ' ').title()} Traffic",
-                        color=traffic_color,
-                        weight=4 if show_traffic else 2,
-                        opacity=0.8
-                    )
-                    
-                    # Add to appropriate traffic group
-                    line.add_to(traffic_groups[traffic_level])
-            
-            elif geometry.get('type') == 'MultiLineString':
-                coordinates = geometry.get('coordinates', [])
-                for line_coords in coordinates:
-                    if line_coords:
-                        folium_coords = [[coord[1], coord[0]] for coord in line_coords]
+            for street in streets:
+                geometry = street.get('geometry', {})
+                if not geometry:
+                    continue
+                
+                # Create popup with street information
+                popup_html = f"""
+                <div style="font-family: Arial, sans-serif; width: 250px;">
+                    <h4 style="margin: 0 0 8px 0; color: #333;">{street.get('street_name', 'Unknown Street')}</h4>
+                    <p style="margin: 2px 0;"><strong>Type:</strong> {street.get('highway_type', 'N/A').replace('_', ' ').title()}</p>
+                    <p style="margin: 2px 0;"><strong>Lanes:</strong> {street.get('lanes', 'N/A')}</p>
+                    <p style="margin: 2px 0;"><strong>Max Speed:</strong> {street.get('maxspeed', 'N/A')}</p>
+                    <p style="margin: 2px 0;"><strong>Surface:</strong> {street.get('surface', 'N/A')}</p>
+                </div>
+                """
+                
+                # Handle different geometry types
+                if geometry.get('type') == 'LineString':
+                    coordinates = geometry.get('coordinates', [])
+                    if coordinates:
+                        # Convert coordinates to lat/lng format
+                        folium_coords = [[coord[1], coord[0]] for coord in coordinates]
                         
+                        # Create blue polyline for city streets
+                        line = folium.PolyLine(
+                            locations=folium_coords,
+                            popup=folium.Popup(popup_html, max_width=300),
+                            tooltip=f"{street.get('street_name', 'Unknown Street')} - {street.get('highway_type', 'street').replace('_', ' ').title()}",
+                            color='#0074D9',  # Blue color for city streets
+                            weight=3,
+                            opacity=0.8
+                        )
+                        
+                        line.add_to(street_group)
+            
+            logger.info(f"Added {len(streets)} city streets highlighted in blue")
+        
+        else:
+            # Original traffic-based coloring
+            # Create feature groups for different traffic levels
+            traffic_groups = {
+                'very_high': folium.FeatureGroup(name='🔴 Very High Traffic'),
+                'high': folium.FeatureGroup(name='🟠 High Traffic'),
+                'medium': folium.FeatureGroup(name='🟡 Medium Traffic'),
+                'low': folium.FeatureGroup(name='🟢 Low Traffic'),
+                'very_low': folium.FeatureGroup(name='🔵 Very Low Traffic'),
+                'unknown': folium.FeatureGroup(name='⚪ Unknown Traffic')
+            }
+            
+            # Add each feature group to map
+            for group in traffic_groups.values():
+                group.add_to(m)
+            
+            for street in streets:
+                geometry = street.get('geometry', {})
+                if not geometry:
+                    continue
+                
+                # Get traffic level and color
+                traffic_level = street.get('traffic_level', 'unknown')
+                traffic_color = fdot_api.get_traffic_color(traffic_level) if show_traffic else '#0074D9'
+                
+                # Create popup with street information
+                popup_html = f"""
+                <div style="font-family: Arial, sans-serif; width: 250px;">
+                    <h4 style="margin: 0 0 8px 0; color: #333;">{street.get('street_name', 'Unknown Street')}</h4>
+                    <p style="margin: 2px 0;"><strong>Road Number:</strong> {street.get('road_number', 'N/A')}</p>
+                    <p style="margin: 2px 0;"><strong>Traffic Volume:</strong> {street.get('traffic_volume', 0):,}/day</p>
+                    <p style="margin: 2px 0;"><strong>Traffic Level:</strong> {traffic_level.replace('_', ' ').title()}</p>
+                    <p style="margin: 2px 0;"><strong>Length:</strong> {street.get('length', 0):.2f} units</p>
+                    <p style="margin: 2px 0;"><strong>Lanes:</strong> {street.get('lane_count', 'N/A')}</p>
+                    <p style="margin: 2px 0;"><strong>Speed Limit:</strong> {street.get('speed_limit', 'N/A')} mph</p>
+                    <p style="margin: 2px 0;"><strong>County:</strong> {street.get('county', 'N/A')}</p>
+                </div>
+                """
+                
+                # Handle different geometry types
+                if geometry.get('type') == 'LineString':
+                    coordinates = geometry.get('coordinates', [])
+                    if coordinates:
+                        # Convert coordinates to lat/lng format
+                        folium_coords = [[coord[1], coord[0]] for coord in coordinates]
+                        
+                        # Create polyline
                         line = folium.PolyLine(
                             locations=folium_coords,
                             popup=folium.Popup(popup_html, max_width=300),
@@ -275,35 +603,53 @@ def add_streets_to_map(m: folium.Map, streets: List[Dict], show_traffic: bool = 
                             opacity=0.8
                         )
                         
+                        # Add to appropriate traffic group
                         line.add_to(traffic_groups[traffic_level])
-        
-        # Add traffic legend
-        if show_traffic:
-            legend_html = '''
-            <div style="position: fixed; 
-                        top: 10px; right: 10px; width: 200px; height: 180px; 
-                        background: rgba(255,255,255,0.9); 
-                        border: 2px solid #333; border-radius: 8px; z-index:9999; 
-                        font-size:12px; padding: 10px; color: #333; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
-            <h4 style="margin-top: 0; color: #333; text-align: center;">🚦 Traffic Legend</h4>
-            <p style="margin: 4px 0;"><span style="color: #FF0000; font-size: 16px;">●</span> Very High (50k+ vehicles/day)</p>
-            <p style="margin: 4px 0;"><span style="color: #FF6600; font-size: 16px;">●</span> High (25k-50k vehicles/day)</p>
-            <p style="margin: 4px 0;"><span style="color: #FFFF00; font-size: 16px;">●</span> Medium (10k-25k vehicles/day)</p>
-            <p style="margin: 4px 0;"><span style="color: #66FF00; font-size: 16px;">●</span> Low (5k-10k vehicles/day)</p>
-            <p style="margin: 4px 0;"><span style="color: #00FF00; font-size: 16px;">●</span> Very Low (<5k vehicles/day)</p>
-            <p style="margin: 4px 0;"><span style="color: #808080; font-size: 16px;">●</span> Unknown</p>
-            </div>
-            '''
-            m.get_root().html.add_child(folium.Element(legend_html))
-        
-        logger.info(f"Added {len(streets)} streets to map with traffic visualization")
+                
+                elif geometry.get('type') == 'MultiLineString':
+                    coordinates = geometry.get('coordinates', [])
+                    for line_coords in coordinates:
+                        if line_coords:
+                            folium_coords = [[coord[1], coord[0]] for coord in line_coords]
+                            
+                            line = folium.PolyLine(
+                                locations=folium_coords,
+                                popup=folium.Popup(popup_html, max_width=300),
+                                tooltip=f"{street.get('street_name', 'Unknown')} - {traffic_level.replace('_', ' ').title()} Traffic",
+                                color=traffic_color,
+                                weight=4 if show_traffic else 2,
+                                opacity=0.8
+                            )
+                            
+                            line.add_to(traffic_groups[traffic_level])
+            
+            # Add traffic legend
+            if show_traffic:
+                legend_html = '''
+                <div style="position: fixed; 
+                            top: 10px; right: 10px; width: 200px; height: 180px; 
+                            background: rgba(255,255,255,0.9); 
+                            border: 2px solid #333; border-radius: 8px; z-index:9999; 
+                            font-size:12px; padding: 10px; color: #333; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+                <h4 style="margin-top: 0; color: #333; text-align: center;">🚦 Traffic Legend</h4>
+                <p style="margin: 4px 0;"><span style="color: #FF0000; font-size: 16px;">●</span> Very High (50k+ vehicles/day)</p>
+                <p style="margin: 4px 0;"><span style="color: #FF6600; font-size: 16px;">●</span> High (25k-50k vehicles/day)</p>
+                <p style="margin: 4px 0;"><span style="color: #FFFF00; font-size: 16px;">●</span> Medium (10k-25k vehicles/day)</p>
+                <p style="margin: 4px 0;"><span style="color: #66FF00; font-size: 16px;">●</span> Low (5k-10k vehicles/day)</p>
+                <p style="margin: 4px 0;"><span style="color: #00FF00; font-size: 16px;">●</span> Very Low (<5k vehicles/day)</p>
+                <p style="margin: 4px 0;"><span style="color: #808080; font-size: 16px;">●</span> Unknown</p>
+                </div>
+                '''
+                m.get_root().html.add_child(folium.Element(legend_html))
+            
+            logger.info(f"Added {len(streets)} streets to map with traffic visualization")
         
     except Exception as e:
         logger.error(f"Error adding streets to map: {e}")
 
 def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None, 
                        show_boundaries: bool = False, show_streets: bool = False, 
-                       show_traffic: bool = True) -> folium.Map:
+                       show_traffic: bool = True, show_only_selected: bool = False) -> folium.Map:
     """
     Create an enhanced interactive map with improved styling, boundaries, and streets
     
@@ -313,10 +659,15 @@ def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None
         show_boundaries: Whether to show city boundaries
         show_streets: Whether to show street data
         show_traffic: Whether to show traffic visualization
+        show_only_selected: Whether to show only selected city (clear everything else)
         
     Returns:
         Folium map object
     """
+    # If no cities, this shouldn't be called - use display_florida_only_map instead
+    if not cities:
+        return None
+    
     # Filter cities with valid coordinates
     valid_cities = [
         city for city in cities 
@@ -326,14 +677,28 @@ def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None
     if not valid_cities:
         return None
     
-    # Calculate center of map based on all cities
-    avg_lat = sum(city['latitude'] for city in valid_cities) / len(valid_cities)
-    avg_lon = sum(city['longitude'] for city in valid_cities) / len(valid_cities)
+    # If showing only selected city, use only that city
+    if show_only_selected and selected_city:
+        cities_to_show = [selected_city] if selected_city in valid_cities else []
+        if not cities_to_show:
+            return None
+    else:
+        cities_to_show = valid_cities
+    
+    # Calculate center and zoom based on selected city or all cities
+    if selected_city and selected_city.get('latitude') and selected_city.get('longitude'):
+        center_lat = selected_city['latitude']
+        center_lon = selected_city['longitude']
+        zoom_level = 12 if show_only_selected else 10  # Closer zoom for selected city only
+    else:
+        center_lat = sum(city['latitude'] for city in cities_to_show) / len(cities_to_show)
+        center_lon = sum(city['longitude'] for city in cities_to_show) / len(cities_to_show)
+        zoom_level = 7
     
     # Create folium map with modern styling
     m = folium.Map(
-        location=[avg_lat, avg_lon],
-        zoom_start=7,
+        location=[center_lat, center_lon],
+        zoom_start=zoom_level,
         tiles=None
     )
     
@@ -357,8 +722,8 @@ def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None
         attr='CartoDB'
     ).add_to(m)
     
-    # Add markers for each city with enhanced styling
-    for city in valid_cities:
+    # Add markers for cities (all cities or only selected city based on mode)
+    for city in cities_to_show:
         population = city.get('population', 0)
         
         # Enhanced popup with better styling
@@ -429,26 +794,36 @@ def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
     
-    # Add city boundaries if requested
+    # Add city boundaries if requested  
     if show_boundaries:
-        for city in valid_cities:
-            if selected_city and city.get('geoid') != selected_city.get('geoid'):
-                continue  # Only show boundary for selected city if one is selected
-                
+        for city in cities_to_show:
+            # Show all boundaries or only selected city based on selection
+            is_selected_city = selected_city and city.get('geoid') == selected_city.get('geoid')
+            
+            # If a city is selected, show all boundaries but highlight the selected one
             try:
                 boundary_data = fdot_api.get_city_boundary(city.get('geoid', ''))
                 if boundary_data:
-                    add_city_boundary_to_map(m, city, boundary_data)
+                    add_city_boundary_to_map(m, city, boundary_data, is_selected=is_selected_city)
             except Exception as e:
                 logger.error(f"Error adding boundary for city {city.get('name', 'Unknown')}: {e}")
     
     # Add streets if requested and a city is selected
     if show_streets and selected_city:
         try:
-            streets = fdot_api.fetch_streets_in_city(selected_city.get('geoid', ''), limit=500)
+            # Use the robust alternative street data method
+            lat, lon = selected_city.get('latitude', 0), selected_city.get('longitude', 0)
+            city_name = selected_city.get('name', 'Unknown')
+            
+            streets = get_alternative_street_data(lat, lon, city_name)
+            
             if streets:
-                add_streets_to_map(m, streets, show_traffic)
-                logger.info(f"Added {len(streets)} streets to map for {selected_city.get('name', 'Unknown')}")
+                # Use blue highlighting for selected city streets
+                add_streets_to_map(m, streets, show_traffic=False, city_selected=True)
+                logger.info(f"Added {len(streets)} streets highlighted in blue for {city_name}")
+            else:
+                logger.warning(f"No street data could be retrieved for {city_name}")
+                
         except Exception as e:
             logger.error(f"Error loading streets for city {selected_city.get('name', 'Unknown')}: {e}")
     
@@ -483,42 +858,60 @@ def display_cities_on_map(cities: List[Dict]) -> None:
         st.session_state.selected_city = None
     
     # Map configuration options
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     with col1:
-        show_boundaries = st.checkbox("🏢 Show City Boundaries", value=False, help="Display city boundary polygons")
-    with col2:
-        show_streets = st.checkbox("🛣️ Show Streets", value=False, help="Display street network for selected city")
-    with col3:
-        show_traffic = st.checkbox("🚦 Show Traffic Data", value=True, help="Color-code streets by traffic volume")
-    with col4:
         # City selector
-        city_names = [f"{city.get('name', 'Unknown')} ({city.get('geoid', 'N/A')})" for city in valid_cities]
-        selected_index = st.selectbox(
-            "🎯 Select City for Details",
-            range(len(city_names)),
-            format_func=lambda x: city_names[x],
+        city_options = ["View All Cities"] + [f"{city.get('name', 'Unknown')} ({city.get('geoid', 'N/A')})" for city in valid_cities]
+        selected_option = st.selectbox(
+            "🎯 Select View",
+            city_options,
             index=0,
-            help="Choose a city to view boundaries and streets"
+            help="Choose 'View All Cities' or select a specific city for detailed view"
         )
-        st.session_state.selected_city = valid_cities[selected_index] if selected_index is not None else None
+        
+        if selected_option == "View All Cities":
+            st.session_state.selected_city = None
+            show_only_selected = False
+        else:
+            # Find the selected city
+            selected_index = city_options.index(selected_option) - 1  # -1 because of "View All Cities" option
+            st.session_state.selected_city = valid_cities[selected_index]
+            show_only_selected = True
     
-    # Create map with options
-    if show_streets and st.session_state.selected_city:
-        with st.spinner(f"Loading streets for {st.session_state.selected_city.get('name', 'selected city')}..."):
+    with col2:
+        if st.session_state.selected_city:
+            show_streets = st.checkbox("🛣️ Show Streets", value=True, help="Display street network for selected city")
+        else:
+            show_streets = False
+            st.info("📍 Select a specific city to view streets")
+    
+    # Determine what to show
+    if st.session_state.selected_city:
+        # Show only selected city with red boundary and blue streets
+        show_boundaries = True
+        show_traffic = False  # We use blue for city selection mode
+        
+        with st.spinner(f"Loading data for {st.session_state.selected_city.get('name', 'selected city')}..."):
             m = create_enhanced_map(
                 valid_cities, 
                 selected_city=st.session_state.selected_city,
                 show_boundaries=show_boundaries,
                 show_streets=show_streets,
-                show_traffic=show_traffic
+                show_traffic=show_traffic,
+                show_only_selected=show_only_selected
             )
     else:
+        # Show all cities with boundaries
+        show_boundaries = True
+        show_traffic = True
+        
         m = create_enhanced_map(
             valid_cities, 
-            selected_city=st.session_state.selected_city,
+            selected_city=None,
             show_boundaries=show_boundaries,
-            show_streets=show_streets,
-            show_traffic=show_traffic
+            show_streets=False,
+            show_traffic=show_traffic,
+            show_only_selected=False
         )
     
     if m is None:
@@ -577,6 +970,148 @@ def display_cities_on_map(cities: List[Dict]) -> None:
                 st.info("📍 Click on a city marker to see details")
         
         st.markdown('</div>', unsafe_allow_html=True)
+
+def display_street_data_table(streets: List[Dict], city_name: str) -> None:
+    """
+    Display street data in a formatted table
+    
+    Args:
+        streets: List of street data dictionaries
+        city_name: Name of the city for the table title
+    """
+    if not streets:
+        st.info("📍 No street data available for the selected city")
+        return
+    
+    st.subheader(f"🛣️ Street Data for {city_name}")
+    
+    # Prepare data for table
+    table_data = []
+    for street in streets:
+        table_data.append({
+            'Street Name': street.get('street_name', 'Unknown'),
+            'Road Number': street.get('road_number', 'N/A'),
+            'Traffic Volume': f"{street.get('traffic_volume', 0):,}",
+            'Traffic Level': street.get('traffic_level', 'unknown').replace('_', ' ').title(),
+            'Length': f"{street.get('length', 0):.2f}",
+            'Lanes': street.get('lane_count', 'N/A'),
+            'Speed Limit': f"{street.get('speed_limit', 'N/A')} mph" if street.get('speed_limit') else 'N/A',
+            'County': street.get('county', 'N/A'),
+            'Surface Type': street.get('surface_type', 'N/A'),
+            'Functional Class': street.get('functional_class', 'N/A')
+        })
+    
+    # Convert to DataFrame
+    df = pd.DataFrame(table_data)
+    
+    # Add search and filter controls
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        search_term = st.text_input("🔍 Search streets", placeholder="Enter street name...")
+    with col2:
+        traffic_filter = st.selectbox(
+            "🚦 Filter by traffic level",
+            ["All"] + sorted(list(set(street.get('traffic_level', 'unknown').replace('_', ' ').title() for street in streets)))
+        )
+    with col3:
+        sort_by = st.selectbox(
+            "📊 Sort by",
+            ["Street Name", "Traffic Volume", "Length", "Speed Limit"]
+        )
+    
+    # Apply filters
+    filtered_df = df.copy()
+    
+    if search_term:
+        filtered_df = filtered_df[filtered_df['Street Name'].str.contains(search_term, case=False, na=False)]
+    
+    if traffic_filter != "All":
+        filtered_df = filtered_df[filtered_df['Traffic Level'] == traffic_filter]
+    
+    # Apply sorting
+    if sort_by == "Traffic Volume":
+        filtered_df['Sort_Value'] = filtered_df['Traffic Volume'].str.replace(',', '').astype(int)
+        filtered_df = filtered_df.sort_values('Sort_Value', ascending=False)
+        filtered_df = filtered_df.drop('Sort_Value', axis=1)
+    elif sort_by == "Length":
+        filtered_df['Sort_Value'] = pd.to_numeric(filtered_df['Length'], errors='coerce')
+        filtered_df = filtered_df.sort_values('Sort_Value', ascending=False)
+        filtered_df = filtered_df.drop('Sort_Value', axis=1)
+    elif sort_by == "Speed Limit":
+        filtered_df['Sort_Value'] = filtered_df['Speed Limit'].str.extract('(\d+)').astype(float)
+        filtered_df = filtered_df.sort_values('Sort_Value', ascending=False)
+        filtered_df = filtered_df.drop('Sort_Value', axis=1)
+    else:
+        filtered_df = filtered_df.sort_values('Street Name')
+    
+    # Display summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("🛣️ Total Streets", len(filtered_df))
+    with col2:
+        total_traffic = sum(int(row['Traffic Volume'].replace(',', '')) for _, row in filtered_df.iterrows() if row['Traffic Volume'] != '0')
+        st.metric("🚗 Total Daily Traffic", f"{total_traffic:,}")
+    with col3:
+        avg_traffic = total_traffic // len(filtered_df) if len(filtered_df) > 0 else 0
+        st.metric("📊 Avg Traffic/Street", f"{avg_traffic:,}")
+    with col4:
+        total_length = sum(float(row['Length']) for _, row in filtered_df.iterrows() if row['Length'] != '0.00')
+        st.metric("📏 Total Length", f"{total_length:.1f} units")
+    
+    # Display the table
+    st.dataframe(
+        filtered_df, 
+        use_container_width=True,
+        height=400,
+        column_config={
+            "Traffic Volume": st.column_config.NumberColumn(
+                "Traffic Volume (daily)",
+                help="Daily traffic volume",
+                format="%d"
+            ),
+            "Traffic Level": st.column_config.TextColumn(
+                "Traffic Level",
+                help="Classification based on daily traffic volume"
+            )
+        }
+    )
+    
+    # Traffic distribution chart
+    if len(filtered_df) > 0:
+        st.subheader("📈 Traffic Level Distribution")
+        traffic_counts = filtered_df['Traffic Level'].value_counts()
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            # Pie chart
+            fig_pie = px.pie(
+                values=traffic_counts.values,
+                names=traffic_counts.index,
+                title="Streets by Traffic Level",
+                color_discrete_sequence=px.colors.qualitative.Set3
+            )
+            fig_pie.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with col2:
+            # Bar chart
+            fig_bar = px.bar(
+                x=traffic_counts.index,
+                y=traffic_counts.values,
+                title="Street Count by Traffic Level",
+                labels={'x': 'Traffic Level', 'y': 'Number of Streets'},
+                color=traffic_counts.values,
+                color_continuous_scale='Viridis'
+            )
+            fig_bar.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                showlegend=False
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
 
 def display_city_data_main(cities: List[Dict]) -> None:
     """
@@ -732,7 +1267,7 @@ def create_smart_sidebar():
                 step=5,
                 help="Limit the number of cities to fetch"
             )
-            fetch_button = st.button("🚀 Fetch Cities", type="primary", use_container_width=True)
+            fetch_button = st.button("🚀 FETCH CITY", type="primary", use_container_width=True)
             return action, {"limit": limit, "button": fetch_button}
             
         elif action == "🔍 Search Cities":
@@ -827,6 +1362,8 @@ def main():
     # Initialize session state
     if 'cities_data' not in st.session_state:
         st.session_state.cities_data = None
+    if 'selected_city' not in st.session_state:
+        st.session_state.selected_city = None
     
     # Smart sidebar
     action, params = create_smart_sidebar()
@@ -834,21 +1371,66 @@ def main():
     # Handle data fetching
     handle_data_fetch(action, params)
     
-    # Main content area with tabs
+    # Always show the Interactive Map tab first
+    st.markdown("### 🗺️ Interactive City Map")
+    
+    # Display map - either Florida only or with cities
+    if st.session_state.cities_data:
+        cities = st.session_state.cities_data
+        display_cities_on_map(cities)
+    else:
+        # Show Florida state map when no cities are loaded
+        display_florida_only_map()
+    
+    # Show other tabs only if cities data is available
     if st.session_state.cities_data:
         cities = st.session_state.cities_data
         
-        # Create tabs for different views
+        # Show additional tabs for data analysis
+        st.markdown("---")
+        
+        # Create tabs for different views  
         tab1, tab2, tab3, tab4 = st.tabs([
-            "🗺️ Interactive Map", 
-            "📊 Data Table", 
+            "🛣️ Street Data",
+            "📊 City Data", 
             "📈 Analytics", 
             "📋 Summary"
         ])
         
         with tab1:
-            st.markdown("### 🗺️ Interactive City Map")
-            display_cities_on_map(cities)
+            st.markdown("### 🛣️ Street Data Analysis")
+            
+            if 'selected_city' in st.session_state and st.session_state.selected_city:
+                selected = st.session_state.selected_city
+                
+                # Load street data using the robust alternative method
+                with st.spinner(f"Loading street data for {selected.get('name', 'selected city')}..."):
+                    try:
+                        # Use the alternative street data method
+                        lat, lon = selected.get('latitude', 0), selected.get('longitude', 0)
+                        city_name = selected.get('name', 'Unknown')
+                        
+                        streets = get_alternative_street_data(lat, lon, city_name)
+                        
+                        if streets:
+                            # Store in session state for reuse
+                            st.session_state.current_streets = streets
+                            display_street_data_table(streets, city_name)
+                        else:
+                            st.warning("⚠️ No street data available for this city")
+                            st.info("This might be due to:")
+                            st.markdown("- Limited street data in OpenStreetMap database")
+                            st.markdown("- City location might be outside mapped areas")
+                            st.markdown("- API connectivity issues")
+                    except Exception as e:
+                        st.error(f"❌ Error loading street data: {str(e)}")
+                        logger.error(f"Street data error: {e}")
+            else:
+                st.info("🎯 Please select a city from the map above to view street data")
+                st.markdown("**How to get started:**")
+                st.markdown("1. Press 'FETCH CITY' button from the sidebar")
+                st.markdown("2. Select a specific city from the dropdown on the map")
+                st.markdown("3. Street data will be displayed here")
         
         with tab2:
             st.markdown("### 📊 City Data Table")
