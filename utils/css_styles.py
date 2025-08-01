@@ -382,6 +382,6 @@ def create_footer() -> None:
         <p><strong>Data Source:</strong> 
         <a href="https://gis.fdot.gov/arcgis/rest/services/Admin_Boundaries/FeatureServer/7/query" 
            target="_blank" style="color: #2a5298;">Florida Department of Transportation GIS API</a></p>
-        <p>Built with ❤️ using Streamlit | Enhanced with Folium and Plotly</p>
+        <p>Built with ❤️ using Streamlit | Enhanced with Mapbox and Plotly</p>
     </div>
     """, unsafe_allow_html=True)

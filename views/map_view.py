@@ -1,61 +1,89 @@
 """
-Map View - UI components for map visualization
+Map View - UI components for map visualization using Mapbox
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
 import streamlit as st
-from streamlit_folium import st_folium
+import pydeck as pdk
 import logging
 from models.city_model import City, CityCollection
 from models.street_model import StreetCollection
-from controllers.map_controller import MapController
+from models.traffic_model import TrafficCollection
+from controllers.mapbox_controller import MapboxController
 from controllers.city_controller import CityController
+from controllers.traffic_controller import TrafficController
 
 logger = logging.getLogger(__name__)
 
 
 class MapView:
     """
-    View component for map visualization
+    View component for map visualization using Mapbox
     """
     
-    def __init__(self):
-        """Initialize the map view"""
-        self.map_controller = MapController()
+    def __init__(self, mapbox_token: str = "pk.eyJ1IjoiZGFuaWVsMDkyNyIsImEiOiJjbWRtNWQ4aWEwMTM1MmpxNGZxd2E0bmpnIn0.iwPMtSv1shtLXBi8WdxfgA"):
+        """
+        Initialize the map view with Mapbox integration
+        
+        Args:
+            mapbox_token: Mapbox API token for map rendering
+        """
+        self.mapbox_controller = MapboxController(mapbox_token)
         self.city_controller = CityController()
+        self.traffic_controller = TrafficController()
     
     def display_florida_only_map(self) -> None:
         """
-        Display a map showing only the Florida state boundary
+        Display a map showing only the Florida state boundary using Mapbox
         """
         try:
-            # Center on Florida
-            center_lat, center_lon = 27.8333, -81.717
-            zoom_level = 7
-            
-            # Create base map
-            m = self.map_controller.create_base_map(center_lat, center_lon, zoom_level)
-            
-            # Add Florida state boundary
-            self.map_controller.add_florida_boundary(m)
-            
-            # Add layer control
-            self.map_controller.add_layer_control(m)
+            # Create Florida map with real boundary data
+            deck = self.mapbox_controller.create_florida_map()
             
             # Display the map
             with st.container():
                 st.markdown('<div class="map-container">', unsafe_allow_html=True)
-                st.info("📍 Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
-                st_folium(m, width=None, height=600)
+                st.info("📍 Now showing Florida with **real boundary data** from ArcGIS API! Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
+                
+                # Display map style selector
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    map_style = st.selectbox(
+                        "Map Style",
+                        options=[
+                            'mapbox://styles/mapbox/streets-v11',
+                            'mapbox://styles/mapbox/satellite-v9',
+                            'mapbox://styles/mapbox/light-v10',
+                            'mapbox://styles/mapbox/dark-v10'
+                        ],
+                        format_func=lambda x: {
+                            'mapbox://styles/mapbox/streets-v11': 'Streets',
+                            'mapbox://styles/mapbox/satellite-v9': 'Satellite',
+                            'mapbox://styles/mapbox/light-v10': 'Light',
+                            'mapbox://styles/mapbox/dark-v10': 'Dark'
+                        }[x],
+                        key="florida_map_style"
+                    )
+                
+                # Update deck with selected style if changed
+                if hasattr(st.session_state, 'florida_map_style') and st.session_state.florida_map_style != deck.map_style:
+                    deck.map_style = map_style
+                
+                # Display the Mapbox map using PyDeck
+                st.pydeck_chart(deck, use_container_width=True, height=600)
+                
+                # Show data source info
+                st.success("🌍 **Real-time Florida boundary data** fetched from ArcGIS API")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
         except Exception as e:
             logger.error(f"Error displaying Florida only map: {e}")
-            st.error("❌ Error loading map. Please try refreshing the page.")
+            st.error("❌ Error displaying map. Please try refreshing the page.")
+            st.error(f"Details: {str(e)}")
     
     def display_cities_on_map(self, cities: CityCollection) -> None:
         """
-        Display cities on an enhanced interactive map with options
+        Display cities on an enhanced interactive Mapbox map with options
         
         Args:
             cities: Collection of cities to display
@@ -78,38 +106,57 @@ class MapView:
                 st.session_state.selected_city = None
             
             # Map configuration options
-            selected_city, show_only_selected, show_streets = self._render_map_controls(valid_cities)
+            selected_city, show_only_selected, show_streets, map_style, traffic_options = self._render_mapbox_controls(valid_cities)
             
-            # Create and display the map
-            m = self._create_enhanced_map(
-                valid_cities, 
-                selected_city,
-                show_only_selected,
-                show_streets
+            # Get streets data if needed
+            streets = None
+            if show_streets and selected_city:
+                from controllers.street_controller import StreetController
+                street_controller = StreetController()
+                streets = street_controller.get_streets_for_city(selected_city)
+            
+            # Get traffic data if needed
+            traffic_data = None
+            if traffic_options['show_traffic_data']:
+                traffic_data = self._get_or_fetch_traffic_data(
+                    county_filter=traffic_options.get('county_filter'),
+                    roadway_filter=traffic_options.get('roadway_filter'),
+                    max_records=traffic_options.get('max_records', 1000),
+                    force_refresh=traffic_options.get('force_refresh', False)
+                )
+            
+            # Create Mapbox map
+            deck = self.mapbox_controller.create_florida_map(
+                cities=valid_cities,
+                selected_city=selected_city,
+                streets=streets,
+                traffic_data=traffic_data,
+                show_traffic=traffic_options['show_traffic_data'],
+                show_traffic_heatmap=traffic_options.get('show_heatmap', False),
+                traffic_filter_level=traffic_options.get('traffic_level_filter'),
+                show_only_selected=show_only_selected,
+                map_style=map_style
             )
             
-            if m is None:
-                st.error("🚫 Unable to create map")
-                return
-            
             # Display map with statistics
-            self._display_map_with_stats(m, valid_cities, selected_city)
+            self._display_mapbox_with_stats(deck, valid_cities, selected_city)
             
         except Exception as e:
             logger.error(f"Error displaying cities on map: {e}")
             st.error("❌ Error displaying map. Please try refreshing the page.")
+            st.error(f"Details: {str(e)}")
     
-    def _render_map_controls(self, valid_cities: CityCollection) -> tuple:
+    def _render_mapbox_controls(self, valid_cities: CityCollection) -> tuple:
         """
-        Render map control options
+        Render Mapbox map control options including traffic data controls
         
         Args:
             valid_cities: Collection of valid cities
             
         Returns:
-            Tuple of (selected_city, show_only_selected, show_streets)
+            Tuple of (selected_city, show_only_selected, show_streets, map_style, traffic_options)
         """
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             # City selector
@@ -139,77 +186,105 @@ class MapView:
                 show_streets = False
                 st.info("📍 Select a specific city to view streets")
         
-        return selected_city, show_only_selected, show_streets
-    
-    def _create_enhanced_map(self, cities: CityCollection, selected_city: Optional[City],
-                           show_only_selected: bool, show_streets: bool):
-        """
-        Create enhanced map with cities and optional features
-        
-        Args:
-            cities: Collection of cities
-            selected_city: Currently selected city
-            show_only_selected: Whether to show only selected city
-            show_streets: Whether to show streets
-            
-        Returns:
-            Folium map object
-        """
-        try:
-            # Determine which cities to show
-            if show_only_selected and selected_city:
-                cities_to_show = CityCollection([selected_city.to_dict()])
-            else:
-                cities_to_show = cities
-            
-            # Calculate center and zoom
-            center_lat, center_lon, zoom_level = self.map_controller.calculate_map_center_and_zoom(
-                cities_to_show, selected_city, show_only_selected
+        with col3:
+            # Map style selector
+            map_style = st.selectbox(
+                "🗺️ Map Style",
+                options=[
+                    'mapbox://styles/mapbox/streets-v11',
+                    'mapbox://styles/mapbox/satellite-v9',
+                    'mapbox://styles/mapbox/light-v10',
+                    'mapbox://styles/mapbox/dark-v10'
+                ],
+                format_func=lambda x: {
+                    'mapbox://styles/mapbox/streets-v11': 'Streets',
+                    'mapbox://styles/mapbox/satellite-v9': 'Satellite',
+                    'mapbox://styles/mapbox/light-v10': 'Light',
+                    'mapbox://styles/mapbox/dark-v10': 'Dark'
+                }[x],
+                index=0,
+                help="Select Mapbox map style"
             )
+        
+        with col4:
+            # Traffic data controls
+            show_traffic_data = st.checkbox("🚦 Show Traffic", value=False, 
+                                           help="Display real-time traffic volume and speed data")
+        
+        # Initialize traffic options with default values
+        traffic_options = {
+            'show_traffic_data': show_traffic_data,
+            'show_heatmap': False,
+            'traffic_level_filter': None,
+            'county_filter': None,
+            'roadway_filter': None,
+            'max_records': 1000,
+            'force_refresh': False
+        }
+        
+        if show_traffic_data:
+            st.markdown("### 🚦 Traffic Data Controls")
             
-            # Create base map
-            m = self.map_controller.create_base_map(center_lat, center_lon, zoom_level)
+            # Create traffic control columns
+            traffic_col1, traffic_col2, traffic_col3, traffic_col4 = st.columns(4)
             
-            # Add city markers
-            self.map_controller.add_city_markers(m, cities_to_show, selected_city)
+            with traffic_col1:
+                show_heatmap = st.checkbox("🌡️ Volume Heatmap", value=False,
+                                         help="Show traffic volume as heatmap overlay")
+                
+                traffic_level_filter = st.selectbox(
+                    "📊 Traffic Level Filter",
+                    options=['All', 'Low', 'Moderate', 'High', 'Heavy'],
+                    index=0,
+                    help="Filter traffic data by congestion level"
+                )
             
-            # Add population legend
-            self.map_controller.add_population_legend(m)
+            with traffic_col2:
+                county_filter = st.text_input("🏢 County Filter", 
+                                            placeholder="e.g., Miami-Dade",
+                                            help="Filter by county name (optional)")
+                
+                roadway_filter = st.text_input("🛣️ Roadway Filter",
+                                             placeholder="e.g., I-95",
+                                             help="Filter by roadway name (optional)")
             
-            # Add city boundaries
-            show_boundaries = True
-            if show_boundaries:
-                boundary_func = self.city_controller.get_city_boundary
-                self.map_controller.add_city_boundaries(m, cities_to_show, selected_city, boundary_func)
+            with traffic_col3:
+                max_records = st.number_input("📊 Max Records", 
+                                            min_value=100, max_value=5000, 
+                                            value=1000, step=100,
+                                            help="Maximum number of traffic segments to load")
+                
+                force_refresh = st.button("🔄 Refresh Traffic Data",
+                                        help="Force refresh of traffic data from server")
             
-            # Add streets if requested and a city is selected
-            if show_streets and selected_city:
-                with st.spinner(f"Loading streets for {selected_city.name}..."):
-                    from controllers.street_controller import StreetController
-                    street_controller = StreetController()
-                    streets = street_controller.get_streets_for_city(selected_city)
-                    
-                    if streets.streets:
-                        self.map_controller.add_streets_to_map(m, streets, show_traffic=False, city_selected=True)
-                        logger.info(f"Added {len(streets)} streets for {selected_city.name}")
-                    else:
-                        st.warning(f"⚠️ No street data available for {selected_city.name}")
+            with traffic_col4:
+                # Traffic data status and info
+                traffic_data = self.traffic_controller.get_session_traffic_data()
+                if traffic_data:
+                    stats = self.traffic_controller.get_traffic_statistics(traffic_data)
+                    st.metric("📍 Traffic Segments", stats.get('total_segments', 0))
+                    st.metric("🚗 Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
+                else:
+                    st.info("👆 Enable traffic data above to load real-time traffic information")
             
-            # Add layer control
-            self.map_controller.add_layer_control(m)
-            
-            return m
-            
-        except Exception as e:
-            logger.error(f"Error creating enhanced map: {e}")
-            return None
+            # Update traffic options
+            traffic_options.update({
+                'show_heatmap': show_heatmap,
+                'traffic_level_filter': traffic_level_filter if traffic_level_filter != 'All' else None,
+                'county_filter': county_filter if county_filter.strip() else None,
+                'roadway_filter': roadway_filter if roadway_filter.strip() else None,
+                'max_records': max_records,
+                'force_refresh': force_refresh
+            })
+        
+        return selected_city, show_only_selected, show_streets, map_style, traffic_options
     
-    def _display_map_with_stats(self, m, valid_cities: CityCollection, selected_city: Optional[City]) -> None:
+    def _display_mapbox_with_stats(self, deck: pdk.Deck, valid_cities: CityCollection, selected_city: Optional[City]) -> None:
         """
-        Display map with statistics and interaction
+        Display Mapbox map with statistics and interaction
         
         Args:
-            m: Folium map object
+            deck: PyDeck map object
             valid_cities: Collection of valid cities
             selected_city: Currently selected city
         """
@@ -223,20 +298,21 @@ class MapView:
                 
                 st.markdown("---")
                 
-                # Display the map
-                map_data = st_folium(m, width=None, height=600, returned_objects=["last_clicked"])
+                # Display the Mapbox map using PyDeck
+                st.pydeck_chart(deck, use_container_width=True, height=600)
                 
                 # Show selected city details
                 if selected_city:
                     self._display_selected_city_details(selected_city)
                 
-                # Show clicked city details for additional interaction
-                self._handle_map_click(map_data, valid_cities)
+                # Show data source info
+                st.success("🌍 **Enhanced with Mapbox** - Real-time Florida boundary data from ArcGIS API")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
                 
         except Exception as e:
-            logger.error(f"Error displaying map with stats: {e}")
+            logger.error(f"Error displaying Mapbox map with stats: {e}")
+            st.error("❌ Error displaying map. Please try refreshing the page.")
     
     def _display_map_statistics(self, cities: CityCollection) -> None:
         """Display map statistics header"""
@@ -268,36 +344,238 @@ class MapView:
             st.metric("🆔 GEOID", selected_city.geoid)
             st.metric("🌊 Water Area", f"{selected_city.water_area/1000000:.2f} km²")
     
-    def _handle_map_click(self, map_data: dict, cities: CityCollection) -> None:
-        """Handle map click interactions"""
-        if map_data.get('last_clicked'):
-            try:
-                clicked_lat = map_data['last_clicked']['lat']
-                clicked_lng = map_data['last_clicked']['lng']
-                
-                # Find the closest city to the clicked point
-                closest_city = cities.find_closest_city(clicked_lat, clicked_lng)
-                
-                if closest_city:
-                    st.success(f"📍 Clicked: **{closest_city.name}** - Population: {closest_city.population:,}")
-            except Exception as e:
-                st.info("📍 Click on a city marker to see details")
-                logger.error(f"Error handling map click: {e}")
-    
-    def create_simple_map(self, center_lat: float, center_lon: float, zoom: int = 10):
+    def _get_or_fetch_traffic_data(self, 
+                                  county_filter: Optional[str] = None,
+                                  roadway_filter: Optional[str] = None,
+                                  max_records: int = 1000,
+                                  force_refresh: bool = False) -> Optional[TrafficCollection]:
         """
-        Create a simple map for basic display
+        Get traffic data from session or fetch from API
         
         Args:
-            center_lat: Latitude for map center
-            center_lon: Longitude for map center
-            zoom: Zoom level
+            county_filter: Optional county name to filter results
+            roadway_filter: Optional roadway name to filter results
+            max_records: Maximum number of records to fetch
+            force_refresh: Force refresh of cached data
             
         Returns:
-            Folium map object
+            TrafficCollection with traffic data or None if error
         """
         try:
-            return self.map_controller.create_base_map(center_lat, center_lon, zoom)
+            with st.spinner("🚦 Loading real-time traffic data..."):
+                # Fetch traffic data
+                traffic_data = self.traffic_controller.fetch_and_cache_traffic_data(
+                    county_filter=county_filter,
+                    roadway_filter=roadway_filter,
+                    max_records=max_records,
+                    force_refresh=force_refresh
+                )
+                
+                if traffic_data and len(traffic_data) > 0:
+                    # Display success message with statistics
+                    stats = self.traffic_controller.get_traffic_statistics(traffic_data)
+                    st.success(f"✅ Loaded {stats['total_segments']} traffic segments "
+                             f"(Avg Volume: {stats['avg_volume']:,.0f} vehicles)")
+                    
+                    # Display traffic level breakdown
+                    level_counts = stats['traffic_levels']
+                    if any(level_counts.values()):
+                        cols = st.columns(4)
+                        level_colors = {
+                            'Low': '🟢', 'Moderate': '🟡', 'High': '🟠', 'Heavy': '🔴'
+                        }
+                        for idx, (level, count) in enumerate(level_counts.items()):
+                            if count > 0:
+                                with cols[idx % 4]:
+                                    st.metric(f"{level_colors.get(level, '⚪')} {level}", count)
+                    
+                    return traffic_data
+                else:
+                    st.warning("⚠️ No traffic data found with current filters")
+                    return None
+                    
         except Exception as e:
-            logger.error(f"Error creating simple map: {e}")
+            logger.error(f"Error fetching traffic data: {e}")
+            st.error("❌ Failed to load traffic data. Please try again.")
             return None
+    
+    def display_traffic_data_tab(self) -> None:
+        """
+        Display traffic data analysis tab
+        """
+        try:
+            st.markdown("### 🚦 Real-Time Traffic Analysis")
+            
+            # Get traffic data from session
+            traffic_data = self.traffic_controller.get_session_traffic_data()
+            
+            if not traffic_data:
+                st.info("👆 Enable traffic data in the map view above to see traffic analysis")
+                
+                # Option to fetch traffic data directly
+                if st.button("🚦 Load Traffic Data Now"):
+                    traffic_data = self._get_or_fetch_traffic_data()
+                
+                if not traffic_data:
+                    return
+            
+            # Traffic data analysis interface
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Traffic statistics
+                stats = self.traffic_controller.get_traffic_statistics(traffic_data)
+                self._display_traffic_statistics(stats)
+                
+                # Traffic data table
+                st.markdown("#### 📊 Traffic Data Table")
+                self._display_traffic_data_table(traffic_data)
+            
+            with col2:
+                # Traffic controls and filters
+                st.markdown("#### 🎛️ Analysis Controls")
+                filters = self._create_traffic_filters(traffic_data)
+                
+                # Export options
+                st.markdown("#### 💾 Export Options")
+                self._create_traffic_export_options(traffic_data)
+                
+                # Data quality information
+                st.markdown("#### ℹ️ Data Info")
+                self._display_traffic_data_info(traffic_data)
+            
+        except Exception as e:
+            logger.error(f"Error displaying traffic data tab: {e}")
+            st.error("❌ Error displaying traffic analysis")
+    
+    def _display_traffic_statistics(self, stats: Dict) -> None:
+        """Display traffic statistics overview"""
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("🛣️ Total Segments", stats.get('total_segments', 0))
+            st.metric("🚗 Total Volume", f"{stats.get('total_volume', 0):,}")
+        
+        with col2:
+            st.metric("⚡ Avg Speed", f"{stats.get('avg_speed', 0):.1f} mph")
+            st.metric("📈 Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
+        
+        with col3:
+            congestion_stats = stats.get('congestion_stats', {})
+            st.metric("🔴 Congested", congestion_stats.get('congested_segments', 0))
+            st.metric("🟢 Free Flow", congestion_stats.get('free_flow_segments', 0))
+        
+        with col4:
+            st.metric("📊 Speed Ratio", f"{congestion_stats.get('avg_speed_ratio', 0):.2f}")
+            if stats.get('last_updated'):
+                from datetime import datetime
+                try:
+                    updated_time = datetime.fromisoformat(stats['last_updated'])
+                    st.metric("🕒 Updated", updated_time.strftime('%H:%M'))
+                except:
+                    st.metric("🕒 Updated", "Recent")
+    
+    def _display_traffic_data_table(self, traffic_data: TrafficCollection) -> None:
+        """Display traffic data in tabular format"""
+        import pandas as pd
+        
+        # Convert traffic data to DataFrame
+        data_for_table = []
+        for traffic in traffic_data.traffic_data[:100]:  # Limit to 100 rows for performance
+            data_for_table.append({
+                'Roadway': traffic.roadway_name,
+                'County': traffic.county,
+                'Direction': traffic.direction,
+                'Volume': traffic.traffic_volume,
+                'Speed (mph)': traffic.average_speed,
+                'Speed Limit': traffic.speed_limit,
+                'Speed Ratio': f"{traffic.speed_ratio:.2f}",
+                'Traffic Level': traffic.get_traffic_level(),
+                'Time Interval': traffic.time_interval
+            })
+        
+        if data_for_table:
+            df = pd.DataFrame(data_for_table)
+            st.dataframe(df, use_container_width=True, height=400)
+            
+            if len(traffic_data) > 100:
+                st.info(f"📊 Showing first 100 of {len(traffic_data)} traffic segments")
+        else:
+            st.warning("No traffic data to display")
+    
+    def _create_traffic_filters(self, traffic_data: TrafficCollection) -> Dict:
+        """Create traffic data filter controls"""
+        filters = {}
+        
+        # County filter
+        counties = traffic_data.get_unique_counties()
+        if counties:
+            filters['county'] = st.selectbox(
+                "🏢 Filter by County",
+                ['All'] + counties,
+                key="traffic_county_filter"
+            )
+        
+        # Roadway filter
+        roadways = traffic_data.get_unique_roadways()[:20]  # Limit for performance
+        if roadways:
+            filters['roadway'] = st.selectbox(
+                "🛣️ Filter by Roadway",
+                ['All'] + roadways,
+                key="traffic_roadway_filter"
+            )
+        
+        # Traffic level filter
+        filters['traffic_level'] = st.selectbox(
+            "📊 Filter by Traffic Level",
+            ['All', 'Low', 'Moderate', 'High', 'Heavy'],
+            key="traffic_level_filter"
+        )
+        
+        return filters
+    
+    def _create_traffic_export_options(self, traffic_data: TrafficCollection) -> None:
+        """Create traffic data export options"""
+        export_format = st.selectbox(
+            "📁 Export Format",
+            ['GeoJSON', 'JSON', 'CSV'],
+            key="traffic_export_format"
+        )
+        
+        if st.button("💾 Export Traffic Data"):
+            try:
+                exported_data = self.traffic_controller.export_traffic_data(
+                    traffic_data, export_format.lower()
+                )
+                
+                # Create download
+                filename = f"traffic_data.{export_format.lower()}"
+                st.download_button(
+                    label=f"⬇️ Download {export_format}",
+                    data=exported_data,
+                    file_name=filename,
+                    mime="application/json" if export_format != "CSV" else "text/csv"
+                )
+                
+            except Exception as e:
+                st.error(f"Export failed: {e}")
+    
+    def _display_traffic_data_info(self, traffic_data: TrafficCollection) -> None:
+        """Display traffic data information and metadata"""
+        st.info(f"📊 **Data Source:** FDOT Real-Time Traffic")
+        st.info(f"🔢 **Total Segments:** {len(traffic_data)}")
+        
+        if traffic_data.last_updated:
+            st.info(f"🕒 **Last Updated:** {traffic_data.last_updated}")
+        
+        # Data quality overview
+        quality_counts = {}
+        for traffic in traffic_data.traffic_data:
+            quality = traffic.data_quality
+            quality_counts[quality] = quality_counts.get(quality, 0) + 1
+        
+        if quality_counts:
+            st.markdown("**Data Quality:**")
+            for quality, count in quality_counts.items():
+                if quality != 'Unknown':
+                    st.write(f"• {quality}: {count} segments")

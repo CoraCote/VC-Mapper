@@ -8,7 +8,7 @@ import logging
 
 # Import MVC components
 from models import CityCollection
-from controllers import CityController, StreetController, MapController
+from controllers import CityController, StreetController
 from views import MapView, CityView, StreetView
 from utils import load_css, create_header, create_footer
 from utils.constants import UI_CONFIG
@@ -27,7 +27,7 @@ class FDOTCityExplorer:
         """Initialize the application with MVC components"""
         self.city_controller = CityController()
         self.street_controller = StreetController()
-        self.map_controller = MapController()
+
         
         self.map_view = MapView()
         self.city_view = CityView()
@@ -118,7 +118,8 @@ class FDOTCityExplorer:
             st.markdown("---")
             
             # Create tabs for different views
-            tab1, tab2, tab3, tab4 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "🚦 Traffic Data",
                 "🛣️ Street Data",
                 "📊 City Data", 
                 "📈 Analytics", 
@@ -126,20 +127,31 @@ class FDOTCityExplorer:
             ])
             
             with tab1:
-                self.render_street_tab()
+                self.render_traffic_tab()
             
             with tab2:
-                self.render_city_data_tab(cities)
+                self.render_street_tab()
             
             with tab3:
-                self.render_analytics_tab(cities)
+                self.render_city_data_tab(cities)
             
             with tab4:
+                self.render_analytics_tab(cities)
+            
+            with tab5:
                 self.render_summary_tab(cities)
                 
         except Exception as e:
             logger.error(f"Error rendering data tabs: {e}")
             st.error("❌ Error displaying data tabs")
+    
+    def render_traffic_tab(self):
+        """Render the traffic data tab"""
+        try:
+            self.map_view.display_traffic_data_tab()
+        except Exception as e:
+            logger.error(f"Error rendering traffic tab: {e}")
+            st.error("❌ Error displaying traffic data")
     
     def render_street_tab(self):
         """Render the street data tab"""

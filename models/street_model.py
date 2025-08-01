@@ -89,25 +89,7 @@ class Street:
         """Get formatted traffic level for display"""
         return self.traffic_level.replace('_', ' ').title()
     
-    def get_folium_coordinates(self) -> List[List[float]]:
-        """Convert coordinates to folium format (lat, lng)"""
-        if not self.has_valid_geometry():
-            return []
-        
-        coords = []
-        geometry_type = self.geometry.get('type')
-        
-        if geometry_type == 'LineString':
-            coordinates = self.geometry.get('coordinates', [])
-            coords = [[coord[1], coord[0]] for coord in coordinates]  # Swap x,y to lat,lng
-        elif geometry_type == 'MultiLineString':
-            coordinate_arrays = self.geometry.get('coordinates', [])
-            coords = []
-            for line_coords in coordinate_arrays:
-                if line_coords:
-                    coords.append([[coord[1], coord[0]] for coord in line_coords])
-        
-        return coords
+
     
     def create_popup_html(self) -> str:
         """Create HTML popup content for map display"""

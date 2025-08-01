@@ -5,7 +5,8 @@ City Controller - Handles city data operations and business logic
 from typing import List, Dict, Optional
 import logging
 import streamlit as st
-from fdot_api import FDOTGISAPI
+import requests
+import json
 from models.city_model import City, CityCollection
 
 logger = logging.getLogger(__name__)
@@ -13,12 +14,21 @@ logger = logging.getLogger(__name__)
 
 class CityController:
     """
-    Controller for city-related operations
+    Controller for city-related operations with integrated FDOT GIS API functionality
     """
     
     def __init__(self):
-        """Initialize the city controller with FDOT API client"""
-        self.fdot_api = FDOTGISAPI()
+        """Initialize the city controller with integrated API functionality"""
+        # FDOT GIS API endpoints
+        self.city_boundaries_url = "https://gis.fdot.gov/arcgis/rest/services/Admin_Boundaries/FeatureServer/7/query"
+        
+        # HTTP session for API calls
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'VC-Mapper/1.0',
+            'Accept': 'application/json'
+        })
+        
         self.city_collection = CityCollection()
     
     def fetch_all_cities(self, limit: int = 50) -> CityCollection:
@@ -33,7 +43,7 @@ class CityController:
         """
         try:
             logger.info(f"Fetching {limit} cities from FDOT API")
-            cities_data = self.fdot_api.fetch_cities(limit=limit)
+            cities_data = self._fetch_cities_from_api(limit=limit)
             
             if cities_data:
                 self.city_collection = CityCollection(cities_data)
@@ -60,7 +70,7 @@ class CityController:
         """
         try:
             logger.info(f"Searching for cities matching '{query}'")
-            cities_data = self.fdot_api.search_cities(query, limit)
+            cities_data = self._search_cities_from_api(query, limit)
             
             if cities_data:
                 self.city_collection = CityCollection(cities_data)
@@ -86,7 +96,7 @@ class CityController:
         """
         try:
             logger.info(f"Fetching city with GEOID {geoid}")
-            city_data = self.fdot_api.get_city_by_geoid(geoid)
+            city_data = self._get_city_by_geoid_from_api(geoid)
             
             if city_data:
                 city = City(city_data)
@@ -101,30 +111,7 @@ class CityController:
             logger.error(f"Error fetching city by GEOID: {e}")
             return None
     
-    def get_city_boundary(self, geoid: str) -> Optional[Dict]:
-        """
-        Get city boundary data
-        
-        Args:
-            geoid: Geographic identifier
-            
-        Returns:
-            Boundary data dictionary if found, None otherwise
-        """
-        try:
-            logger.info(f"Fetching boundary for city with GEOID {geoid}")
-            boundary_data = self.fdot_api.get_city_boundary(geoid)
-            
-            if boundary_data:
-                logger.info(f"Successfully fetched boundary data for {geoid}")
-                return boundary_data
-            else:
-                logger.warning(f"No boundary data found for GEOID {geoid}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Error fetching city boundary: {e}")
-            return None
+
     
     def filter_cities(self, cities: CityCollection, filters: Dict) -> CityCollection:
         """
@@ -317,3 +304,239 @@ class CityController:
             logger.error(f"Error handling data fetch action: {e}")
             st.error(f"❌ Error: {str(e)}")
             return False
+    
+    # ===== INTEGRATED FDOT GIS API METHODS =====
+    
+    def _fetch_cities_from_api(self, limit: Optional[int] = None) -> List[Dict]:
+        """
+        Fetch city data from FDOT GIS API
+        
+        Args:
+            limit: Optional limit on number of cities to return
+            
+        Returns:
+            List of city dictionaries with properties like name, geoid, coordinates, etc.
+        """
+        try:
+            # Build query parameters
+            params = {
+                'where': '1=1',  # Get all records
+                'outFields': '*',  # Get all fields
+                'f': 'json',  # Return JSON format
+                'returnGeometry': 'true'  # Include geometry data
+            }
+            
+            if limit:
+                params['resultRecordCount'] = limit
+            
+            logger.info(f"Fetching cities from FDOT GIS API with params: {params}")
+            
+            # Make the API request
+            response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the JSON response
+            data = response.json()
+            
+            if 'features' not in data:
+                logger.error("No features found in API response")
+                return []
+            
+            # Extract and format city data
+            cities = []
+            for feature in data['features']:
+                if 'attributes' in feature:
+                    city_data = self._format_city_data(feature)
+                    if city_data:
+                        cities.append(city_data)
+            
+            logger.info(f"Successfully fetched {len(cities)} cities from FDOT GIS API")
+            return cities
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching cities from FDOT GIS API: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON response from FDOT GIS API: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching cities: {e}")
+            return []
+    
+    def _search_cities_from_api(self, query: str, limit: Optional[int] = 10) -> List[Dict]:
+        """
+        Search for cities by name using FDOT GIS API
+        
+        Args:
+            query: Search query string
+            limit: Optional limit on number of results
+            
+        Returns:
+            List of matching city dictionaries
+        """
+        try:
+            # Build search query - use LIKE for fuzzy matching
+            where_clause = f"NAME LIKE '%{query.upper()}%' OR FULLNAME LIKE '%{query.upper()}%'"
+            
+            params = {
+                'where': where_clause,
+                'outFields': '*',
+                'f': 'json',
+                'returnGeometry': 'true'
+            }
+            
+            if limit:
+                params['resultRecordCount'] = limit
+            
+            logger.info(f"Searching cities with query '{query}' using params: {params}")
+            
+            # Make the API request
+            response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the JSON response
+            data = response.json()
+            
+            if 'features' not in data:
+                logger.warning(f"No features found for search query: {query}")
+                return []
+            
+            # Extract and format city data
+            cities = []
+            for feature in data['features']:
+                if 'attributes' in feature:
+                    city_data = self._format_city_data(feature)
+                    if city_data:
+                        cities.append(city_data)
+            
+            logger.info(f"Found {len(cities)} cities matching '{query}'")
+            return cities
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error searching cities: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing search response: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error searching cities: {e}")
+            return []
+    
+    def _get_city_by_geoid_from_api(self, geoid: str) -> Optional[Dict]:
+        """
+        Get a specific city by GEOID using FDOT GIS API
+        
+        Args:
+            geoid: Geographic identifier
+            
+        Returns:
+            City data dictionary if found, None otherwise
+        """
+        try:
+            params = {
+                'where': f"GEOID = '{geoid}'",
+                'outFields': '*',
+                'f': 'json',
+                'returnGeometry': 'true'
+            }
+            
+            logger.info(f"Fetching city with GEOID {geoid}")
+            
+            # Make the API request
+            response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the JSON response
+            data = response.json()
+            
+            if 'features' not in data or len(data['features']) == 0:
+                logger.warning(f"No city found with GEOID: {geoid}")
+                return None
+            
+            # Get the first (and should be only) feature
+            feature = data['features'][0]
+            
+            if 'attributes' in feature:
+                city_data = self._format_city_data(feature)
+                if city_data:
+                    logger.info(f"Found city: {city_data.get('name', 'Unknown')}")
+                    return city_data
+            
+            logger.warning(f"Invalid city data for GEOID: {geoid}")
+            return None
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching city by GEOID: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing city response: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching city by GEOID: {e}")
+            return None
+    
+    def _format_city_data(self, feature: Dict) -> Optional[Dict]:
+        """
+        Format raw FDOT GIS API feature data into standardized city dictionary
+        
+        Args:
+            feature: Raw feature data from FDOT GIS API
+            
+        Returns:
+            Formatted city data dictionary or None if invalid
+        """
+        try:
+            attrs = feature.get('attributes', {})
+            geometry = feature.get('geometry', {})
+            
+            # Extract required fields
+            name = attrs.get('NAME', '').strip()
+            full_name = attrs.get('FULLNAME', name).strip()
+            geoid = str(attrs.get('GEOID', ''))
+            
+            # Skip if no name or geoid
+            if not name or not geoid:
+                return None
+            
+            # Extract coordinates (convert from string if needed)
+            try:
+                lat_str = attrs.get('INTPTLAT', '0')
+                lon_str = attrs.get('INTPTLON', '0')
+                latitude = float(lat_str.replace('+', '')) if lat_str else 0.0
+                longitude = float(lon_str.replace('+', '')) if lon_str else 0.0
+            except (ValueError, TypeError):
+                latitude = longitude = 0.0
+            
+            # Extract other fields with defaults
+            population = attrs.get('POP', 0) or 0
+            land_area = attrs.get('ALAND', 0) or 0.0
+            water_area = attrs.get('AWATER', 0) or 0.0
+            state_fips = attrs.get('STATEFP', '12')  # Florida is 12
+            place_fips = attrs.get('PLACEFP', '')
+            lsad = attrs.get('LSAD', '')
+            class_fp = attrs.get('CLASSFP', '')
+            func_stat = attrs.get('FUNCSTAT', '')
+            
+            # Create standardized city data dictionary
+            city_data = {
+                'name': name,
+                'full_name': full_name,
+                'geoid': geoid,
+                'latitude': latitude,
+                'longitude': longitude,
+                'population': int(population),
+                'land_area': float(land_area),
+                'water_area': float(water_area),
+                'state_fips': str(state_fips),
+                'place_fips': str(place_fips),
+                'lsad': str(lsad),
+                'class_fp': str(class_fp),
+                'func_stat': str(func_stat),
+                'geometry': geometry
+            }
+            
+            return city_data
+            
+        except Exception as e:
+            logger.error(f"Error formatting city data: {e}")
+            return None
