@@ -18,7 +18,23 @@ class FDOTGISAPI:
     
     def __init__(self):
         """Initialize the FDOT GIS API client"""
-        self.base_url = "https://gis.fdot.gov/arcgis/rest/services/Admin_Boundaries/FeatureServer/7/query"
+        # City boundaries endpoint
+        self.city_boundaries_url = "https://gis.fdot.gov/arcgis/rest/services/Admin_Boundaries/FeatureServer/7/query"
+        
+        # FLARIS street and road endpoints
+        self.flaris_base_url = "https://gis.fdot.gov/arcgis/rest/services/sso/ssogis_flaris/FeatureServer"
+        self.flaris_streets_url = f"{self.flaris_base_url}/0/query"  # ARBM Streets
+        self.flaris_routes_url = f"{self.flaris_base_url}/1/query"   # ARBM Routes
+        self.flaris_intersections_url = f"{self.flaris_base_url}/2/query"  # Intersections
+        
+        # Additional road data endpoints
+        self.county_roads_url = "https://gis-fdot.opendata.arcgis.com/datasets/county-roads-tda/api"
+        self.state_roads_url = "https://gis-fdot.opendata.arcgis.com/datasets/state-roads-tda/geoservice"
+        self.roadways_local_name_url = "https://gis-fdot.opendata.arcgis.com/datasets/fdot::roadways-with-local-name-tda/about"
+        
+        # Keep the original base_url for backward compatibility
+        self.base_url = self.city_boundaries_url
+        
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'VC-Mapper/1.0',
@@ -222,4 +238,206 @@ class FDOTGISAPI:
             
         except Exception as e:
             logger.error(f"Error fetching city by GEOID {geoid}: {e}")
-            return None 
+            return None
+    
+    def get_city_boundary(self, city_geoid: str) -> Optional[Dict]:
+        """
+        Get city boundary geometry for a specific city
+        
+        Args:
+            city_geoid: Geographic identifier for the city
+            
+        Returns:
+            City boundary data with geometry or None if not found
+        """
+        try:
+            params = {
+                'where': f"GEOID = '{city_geoid}'",
+                'outFields': '*',
+                'f': 'json',
+                'returnGeometry': 'true'
+            }
+            
+            response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'features' in data and len(data['features']) > 0:
+                feature = data['features'][0]
+                boundary_data = {
+                    'geoid': city_geoid,
+                    'geometry': feature.get('geometry', {}),
+                    'attributes': feature.get('attributes', {})
+                }
+                logger.info(f"Successfully fetched boundary for city {city_geoid}")
+                return boundary_data
+            
+            logger.warning(f"No boundary found for city {city_geoid}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error fetching city boundary for {city_geoid}: {e}")
+            return None
+    
+    def fetch_streets_in_city(self, city_geoid: str, limit: Optional[int] = None) -> List[Dict]:
+        """
+        Fetch street data for a specific city using FLARIS endpoints
+        
+        Args:
+            city_geoid: Geographic identifier for the city
+            limit: Optional limit on number of streets to return
+            
+        Returns:
+            List of street dictionaries with geometry and attributes
+        """
+        try:
+            # First get city boundary to create spatial filter
+            city_boundary = self.get_city_boundary(city_geoid)
+            if not city_boundary:
+                logger.warning(f"Cannot fetch streets without city boundary for {city_geoid}")
+                return []
+            
+            # Build spatial query using city boundary
+            params = {
+                'where': '1=1',  # Get all records within spatial filter
+                'outFields': '*',
+                'f': 'json',
+                'returnGeometry': 'true',
+                'spatialRel': 'esriSpatialRelIntersects'
+            }
+            
+            # Add geometry filter if available
+            if city_boundary.get('geometry'):
+                params['geometry'] = json.dumps(city_boundary['geometry'])
+                params['geometryType'] = 'esriGeometryPolygon'
+            
+            if limit:
+                params['resultRecordCount'] = limit
+            
+            logger.info(f"Fetching streets for city {city_geoid} from FLARIS API")
+            
+            # Try FLARIS streets endpoint first
+            response = self.session.get(self.flaris_streets_url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if 'features' not in data:
+                logger.warning("No street features found in API response")
+                return []
+            
+            # Format street data
+            streets = []
+            for feature in data['features']:
+                if 'attributes' in feature:
+                    street_data = self._format_street_data(feature)
+                    if street_data:
+                        streets.append(street_data)
+            
+            logger.info(f"Successfully fetched {len(streets)} streets for city {city_geoid}")
+            return streets
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching streets from FLARIS API: {e}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON response from FLARIS API: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching streets: {e}")
+            return []
+    
+    def _format_street_data(self, feature: Dict) -> Optional[Dict]:
+        """
+        Format raw street feature data into standardized format
+        
+        Args:
+            feature: Raw street feature data from API
+            
+        Returns:
+            Formatted street data dictionary or None if invalid
+        """
+        try:
+            attributes = feature.get('attributes', {})
+            geometry = feature.get('geometry', {})
+            
+            # Extract street properties (adapt field names based on FLARIS schema)
+            street_data = {
+                'street_id': attributes.get('OBJECTID', ''),
+                'street_name': attributes.get('STREET_NAME', attributes.get('NAME', '')),
+                'road_number': attributes.get('ROAD_NUMBER', ''),
+                'route_id': attributes.get('ROUTE_ID', ''),
+                'from_measure': attributes.get('FROM_MEASURE', 0),
+                'to_measure': attributes.get('TO_MEASURE', 0),
+                'length': attributes.get('LENGTH', 0),
+                'county': attributes.get('COUNTY', ''),
+                'district': attributes.get('DISTRICT', ''),
+                'roadway_id': attributes.get('ROADWAY_ID', ''),
+                'geometry': geometry,
+                'traffic_volume': attributes.get('TRAFFIC_VOLUME', attributes.get('AADT', 0)),  # Annual Average Daily Traffic
+                'traffic_level': self._classify_traffic_level(attributes.get('TRAFFIC_VOLUME', attributes.get('AADT', 0))),
+                'functional_class': attributes.get('FUNCTIONAL_CLASS', ''),
+                'surface_type': attributes.get('SURFACE_TYPE', ''),
+                'lane_count': attributes.get('LANE_COUNT', 0),
+                'speed_limit': attributes.get('SPEED_LIMIT', 0),
+                'raw_attributes': attributes  # Keep all original attributes for reference
+            }
+            
+            # Validate required fields
+            if not street_data['street_name'] and not street_data['road_number']:
+                logger.warning(f"Skipping street with missing name/number: {street_data}")
+                return None
+            
+            return street_data
+            
+        except Exception as e:
+            logger.error(f"Error formatting street data: {e}")
+            return None
+    
+    def _classify_traffic_level(self, traffic_volume: int) -> str:
+        """
+        Classify traffic level based on volume
+        
+        Args:
+            traffic_volume: Annual Average Daily Traffic (AADT) or similar metric
+            
+        Returns:
+            Traffic level classification string
+        """
+        try:
+            volume = int(traffic_volume) if traffic_volume else 0
+            
+            if volume >= 50000:
+                return 'very_high'
+            elif volume >= 25000:
+                return 'high'
+            elif volume >= 10000:
+                return 'medium'
+            elif volume >= 5000:
+                return 'low'
+            else:
+                return 'very_low'
+                
+        except (ValueError, TypeError):
+            return 'unknown'
+    
+    def get_traffic_color(self, traffic_level: str) -> str:
+        """
+        Get color code for traffic level visualization
+        
+        Args:
+            traffic_level: Traffic level classification
+            
+        Returns:
+            Hex color code for the traffic level
+        """
+        traffic_colors = {
+            'very_high': '#FF0000',  # Red
+            'high': '#FF6600',       # Orange
+            'medium': '#FFFF00',     # Yellow
+            'low': '#66FF00',        # Light Green
+            'very_low': '#00FF00',   # Green
+            'unknown': '#808080'     # Gray
+        }
+        return traffic_colors.get(traffic_level, '#808080') 

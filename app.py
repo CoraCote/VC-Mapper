@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 import folium
 from streamlit_folium import st_folium
@@ -149,12 +149,170 @@ def display_city_data_sidebar(cities: List[Dict]) -> None:
     st.sidebar.metric("Total Population", f"{total_population:,}")
     st.sidebar.metric("Average Population", f"{avg_population:,.0f}")
 
-def create_enhanced_map(cities: List[Dict]) -> folium.Map:
+def add_city_boundary_to_map(m: folium.Map, city_data: Dict, boundary_data: Dict) -> None:
     """
-    Create an enhanced interactive map with improved styling
+    Add city boundary to the map
+    
+    Args:
+        m: Folium map object
+        city_data: City information
+        boundary_data: Boundary geometry data
+    """
+    try:
+        geometry = boundary_data.get('geometry', {})
+        if not geometry:
+            logger.warning(f"No geometry data for city {city_data.get('name', 'Unknown')}")
+            return
+        
+        # Convert geometry to GeoJSON format for folium
+        if geometry.get('type') == 'Polygon':
+            coordinates = geometry.get('coordinates', [])
+            if coordinates:
+                # Convert coordinates to lat/lng format for folium
+                folium_coords = []
+                for ring in coordinates:
+                    ring_coords = [[coord[1], coord[0]] for coord in ring]  # Swap x,y to lat,lng
+                    folium_coords.append(ring_coords)
+                
+                # Add polygon to map
+                folium.Polygon(
+                    locations=folium_coords,
+                    popup=f"<b>{city_data.get('name', 'Unknown')}</b><br/>City Boundary",
+                    tooltip=f"City: {city_data.get('name', 'Unknown')}",
+                    color='blue',
+                    weight=2,
+                    fillColor='lightblue',
+                    fillOpacity=0.2
+                ).add_to(m)
+                
+                logger.info(f"Added boundary for city {city_data.get('name', 'Unknown')}")
+        
+    except Exception as e:
+        logger.error(f"Error adding city boundary to map: {e}")
+
+def add_streets_to_map(m: folium.Map, streets: List[Dict], show_traffic: bool = True) -> None:
+    """
+    Add street data to the map with traffic visualization
+    
+    Args:
+        m: Folium map object
+        streets: List of street data
+        show_traffic: Whether to show traffic-based coloring
+    """
+    try:
+        if not streets:
+            return
+        
+        # Create feature groups for different traffic levels
+        traffic_groups = {
+            'very_high': folium.FeatureGroup(name='🔴 Very High Traffic'),
+            'high': folium.FeatureGroup(name='🟠 High Traffic'),
+            'medium': folium.FeatureGroup(name='🟡 Medium Traffic'),
+            'low': folium.FeatureGroup(name='🟢 Low Traffic'),
+            'very_low': folium.FeatureGroup(name='🔵 Very Low Traffic'),
+            'unknown': folium.FeatureGroup(name='⚪ Unknown Traffic')
+        }
+        
+        # Add each feature group to map
+        for group in traffic_groups.values():
+            group.add_to(m)
+        
+        for street in streets:
+            geometry = street.get('geometry', {})
+            if not geometry:
+                continue
+            
+            # Get traffic level and color
+            traffic_level = street.get('traffic_level', 'unknown')
+            traffic_color = fdot_api.get_traffic_color(traffic_level) if show_traffic else '#0074D9'
+            
+            # Create popup with street information
+            popup_html = f"""
+            <div style="font-family: Arial, sans-serif; width: 250px;">
+                <h4 style="margin: 0 0 8px 0; color: #333;">{street.get('street_name', 'Unknown Street')}</h4>
+                <p style="margin: 2px 0;"><strong>Road Number:</strong> {street.get('road_number', 'N/A')}</p>
+                <p style="margin: 2px 0;"><strong>Traffic Volume:</strong> {street.get('traffic_volume', 0):,}/day</p>
+                <p style="margin: 2px 0;"><strong>Traffic Level:</strong> {traffic_level.replace('_', ' ').title()}</p>
+                <p style="margin: 2px 0;"><strong>Length:</strong> {street.get('length', 0):.2f} units</p>
+                <p style="margin: 2px 0;"><strong>Lanes:</strong> {street.get('lane_count', 'N/A')}</p>
+                <p style="margin: 2px 0;"><strong>Speed Limit:</strong> {street.get('speed_limit', 'N/A')} mph</p>
+                <p style="margin: 2px 0;"><strong>County:</strong> {street.get('county', 'N/A')}</p>
+            </div>
+            """
+            
+            # Handle different geometry types
+            if geometry.get('type') == 'LineString':
+                coordinates = geometry.get('coordinates', [])
+                if coordinates:
+                    # Convert coordinates to lat/lng format
+                    folium_coords = [[coord[1], coord[0]] for coord in coordinates]
+                    
+                    # Create polyline
+                    line = folium.PolyLine(
+                        locations=folium_coords,
+                        popup=folium.Popup(popup_html, max_width=300),
+                        tooltip=f"{street.get('street_name', 'Unknown')} - {traffic_level.replace('_', ' ').title()} Traffic",
+                        color=traffic_color,
+                        weight=4 if show_traffic else 2,
+                        opacity=0.8
+                    )
+                    
+                    # Add to appropriate traffic group
+                    line.add_to(traffic_groups[traffic_level])
+            
+            elif geometry.get('type') == 'MultiLineString':
+                coordinates = geometry.get('coordinates', [])
+                for line_coords in coordinates:
+                    if line_coords:
+                        folium_coords = [[coord[1], coord[0]] for coord in line_coords]
+                        
+                        line = folium.PolyLine(
+                            locations=folium_coords,
+                            popup=folium.Popup(popup_html, max_width=300),
+                            tooltip=f"{street.get('street_name', 'Unknown')} - {traffic_level.replace('_', ' ').title()} Traffic",
+                            color=traffic_color,
+                            weight=4 if show_traffic else 2,
+                            opacity=0.8
+                        )
+                        
+                        line.add_to(traffic_groups[traffic_level])
+        
+        # Add traffic legend
+        if show_traffic:
+            legend_html = '''
+            <div style="position: fixed; 
+                        top: 10px; right: 10px; width: 200px; height: 180px; 
+                        background: rgba(255,255,255,0.9); 
+                        border: 2px solid #333; border-radius: 8px; z-index:9999; 
+                        font-size:12px; padding: 10px; color: #333; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
+            <h4 style="margin-top: 0; color: #333; text-align: center;">🚦 Traffic Legend</h4>
+            <p style="margin: 4px 0;"><span style="color: #FF0000; font-size: 16px;">●</span> Very High (50k+ vehicles/day)</p>
+            <p style="margin: 4px 0;"><span style="color: #FF6600; font-size: 16px;">●</span> High (25k-50k vehicles/day)</p>
+            <p style="margin: 4px 0;"><span style="color: #FFFF00; font-size: 16px;">●</span> Medium (10k-25k vehicles/day)</p>
+            <p style="margin: 4px 0;"><span style="color: #66FF00; font-size: 16px;">●</span> Low (5k-10k vehicles/day)</p>
+            <p style="margin: 4px 0;"><span style="color: #00FF00; font-size: 16px;">●</span> Very Low (<5k vehicles/day)</p>
+            <p style="margin: 4px 0;"><span style="color: #808080; font-size: 16px;">●</span> Unknown</p>
+            </div>
+            '''
+            m.get_root().html.add_child(folium.Element(legend_html))
+        
+        logger.info(f"Added {len(streets)} streets to map with traffic visualization")
+        
+    except Exception as e:
+        logger.error(f"Error adding streets to map: {e}")
+
+def create_enhanced_map(cities: List[Dict], selected_city: Optional[Dict] = None, 
+                       show_boundaries: bool = False, show_streets: bool = False, 
+                       show_traffic: bool = True) -> folium.Map:
+    """
+    Create an enhanced interactive map with improved styling, boundaries, and streets
     
     Args:
         cities: List of city dictionaries with latitude and longitude
+        selected_city: Optional selected city for detailed view
+        show_boundaries: Whether to show city boundaries
+        show_streets: Whether to show street data
+        show_traffic: Whether to show traffic visualization
         
     Returns:
         Folium map object
@@ -271,6 +429,29 @@ def create_enhanced_map(cities: List[Dict]) -> folium.Map:
     '''
     m.get_root().html.add_child(folium.Element(legend_html))
     
+    # Add city boundaries if requested
+    if show_boundaries:
+        for city in valid_cities:
+            if selected_city and city.get('geoid') != selected_city.get('geoid'):
+                continue  # Only show boundary for selected city if one is selected
+                
+            try:
+                boundary_data = fdot_api.get_city_boundary(city.get('geoid', ''))
+                if boundary_data:
+                    add_city_boundary_to_map(m, city, boundary_data)
+            except Exception as e:
+                logger.error(f"Error adding boundary for city {city.get('name', 'Unknown')}: {e}")
+    
+    # Add streets if requested and a city is selected
+    if show_streets and selected_city:
+        try:
+            streets = fdot_api.fetch_streets_in_city(selected_city.get('geoid', ''), limit=500)
+            if streets:
+                add_streets_to_map(m, streets, show_traffic)
+                logger.info(f"Added {len(streets)} streets to map for {selected_city.get('name', 'Unknown')}")
+        except Exception as e:
+            logger.error(f"Error loading streets for city {selected_city.get('name', 'Unknown')}: {e}")
+    
     # Add layer control
     folium.LayerControl().add_to(m)
     
@@ -278,7 +459,7 @@ def create_enhanced_map(cities: List[Dict]) -> folium.Map:
 
 def display_cities_on_map(cities: List[Dict]) -> None:
     """
-    Display cities on an enhanced interactive map
+    Display cities on an enhanced interactive map with boundary and street options
     
     Args:
         cities: List of city dictionaries with latitude and longitude
@@ -297,8 +478,48 @@ def display_cities_on_map(cities: List[Dict]) -> None:
         st.error("🚫 No cities with valid coordinates found")
         return
     
-    # Create map
-    m = create_enhanced_map(valid_cities)
+    # Initialize session state for selected city
+    if 'selected_city' not in st.session_state:
+        st.session_state.selected_city = None
+    
+    # Map configuration options
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        show_boundaries = st.checkbox("🏢 Show City Boundaries", value=False, help="Display city boundary polygons")
+    with col2:
+        show_streets = st.checkbox("🛣️ Show Streets", value=False, help="Display street network for selected city")
+    with col3:
+        show_traffic = st.checkbox("🚦 Show Traffic Data", value=True, help="Color-code streets by traffic volume")
+    with col4:
+        # City selector
+        city_names = [f"{city.get('name', 'Unknown')} ({city.get('geoid', 'N/A')})" for city in valid_cities]
+        selected_index = st.selectbox(
+            "🎯 Select City for Details",
+            range(len(city_names)),
+            format_func=lambda x: city_names[x],
+            index=0,
+            help="Choose a city to view boundaries and streets"
+        )
+        st.session_state.selected_city = valid_cities[selected_index] if selected_index is not None else None
+    
+    # Create map with options
+    if show_streets and st.session_state.selected_city:
+        with st.spinner(f"Loading streets for {st.session_state.selected_city.get('name', 'selected city')}..."):
+            m = create_enhanced_map(
+                valid_cities, 
+                selected_city=st.session_state.selected_city,
+                show_boundaries=show_boundaries,
+                show_streets=show_streets,
+                show_traffic=show_traffic
+            )
+    else:
+        m = create_enhanced_map(
+            valid_cities, 
+            selected_city=st.session_state.selected_city,
+            show_boundaries=show_boundaries,
+            show_streets=show_streets,
+            show_traffic=show_traffic
+        )
     
     if m is None:
         st.error("🚫 Unable to create map")
@@ -327,7 +548,21 @@ def display_cities_on_map(cities: List[Dict]) -> None:
         # Display the map
         map_data = st_folium(m, width=None, height=600, returned_objects=["last_clicked"])
         
-        # Show clicked city details
+        # Show selected city details
+        if st.session_state.selected_city:
+            selected = st.session_state.selected_city
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.info(f"🎯 **Selected City:** {selected.get('name', 'Unknown')}")
+                st.metric("👥 Population", f"{selected.get('population', 0):,}")
+            with col2:
+                st.metric("🏞️ Land Area", f"{selected.get('land_area', 0)/1000000:.2f} km²")
+                st.metric("📍 Coordinates", f"{selected.get('latitude', 0):.4f}, {selected.get('longitude', 0):.4f}")
+            with col3:
+                st.metric("🆔 GEOID", selected.get('geoid', 'N/A'))
+                st.metric("🌊 Water Area", f"{selected.get('water_area', 0)/1000000:.2f} km²")
+        
+        # Show clicked city details for additional interaction
         if map_data.get('last_clicked'):
             try:
                 clicked_lat = map_data['last_clicked']['lat']
@@ -337,7 +572,7 @@ def display_cities_on_map(cities: List[Dict]) -> None:
                 closest_city = min(valid_cities, 
                                  key=lambda city: abs(city.get('latitude', 0) - clicked_lat) + abs(city.get('longitude', 0) - clicked_lng))
                 
-                st.success(f"📍 Selected: **{closest_city.get('name', 'Unknown')}** - Population: {closest_city.get('population', 0):,}")
+                st.success(f"📍 Clicked: **{closest_city.get('name', 'Unknown')}** - Population: {closest_city.get('population', 0):,}")
             except Exception as e:
                 st.info("📍 Click on a city marker to see details")
         
