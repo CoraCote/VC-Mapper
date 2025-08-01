@@ -54,10 +54,15 @@ class FDOTCityExplorer:
         )
     
     def render_header(self):
-        """Render the application header"""
-        create_header(
-            title="🗺️ FDOT City Data Explorer",
-            subtitle="Explore Florida city data with interactive maps and analytics"
+        """Render the simplified application header"""
+        # Simple title following the wireframe design
+        st.markdown(
+            """
+            <div style="text-align: center; padding: 1rem 0;">
+                <h1 style="margin: 0; color: #1f77b4;">🗺️ FDOT City Data Explorer</h1>
+            </div>
+            """, 
+            unsafe_allow_html=True
         )
     
     def render_sidebar(self) -> tuple:
@@ -89,18 +94,17 @@ class FDOTCityExplorer:
             return "🌍 Fetch All Cities", {"limit": 50, "button": False}
     
     def render_main_map(self):
-        """Render the main interactive map"""
+        """Render the main interactive map with new simplified layout"""
         try:
-            st.markdown("### 🗺️ Interactive City Map")
-            
             # Get cities from session
             cities = self.city_controller.get_session_cities()
             
             if cities and len(cities) > 0:
-                # Display map with cities
+                # Display map with new simplified UI
                 self.map_view.display_cities_on_map(cities)
             else:
-                # Show Florida only map when no cities are loaded
+                # Show a simplified message and Florida map when no cities are loaded
+                st.info("👆 Use the sidebar to fetch city data and start exploring!")
                 self.map_view.display_florida_only_map()
                 
         except Exception as e:
@@ -195,6 +199,38 @@ class FDOTCityExplorer:
             logger.error(f"Error rendering summary tab: {e}")
             st.error("❌ Error displaying summary statistics")
     
+    def render_simplified_data_tabs(self, cities: CityCollection):
+        """
+        Render simplified data tabs when Show Data button is pressed
+        
+        Args:
+            cities: Collection of cities to display data for
+        """
+        try:
+            # Create simplified tabs for data analysis
+            tab1, tab2, tab3 = st.tabs([
+                "📊 City Data", 
+                "🚦 Traffic Analysis", 
+                "📈 Summary Stats"
+            ])
+            
+            with tab1:
+                # Simplified city data table
+                filters = self.city_view.create_filter_controls(cities)
+                self.city_view.display_city_data_main(cities, filters)
+            
+            with tab2:
+                # Traffic analysis
+                self.render_traffic_tab()
+            
+            with tab3:
+                # Summary statistics
+                self.render_summary_tab(cities)
+                
+        except Exception as e:
+            logger.error(f"Error rendering simplified data tabs: {e}")
+            st.error("❌ Error displaying data analysis")
+    
     def render_welcome_screen(self):
         """Render welcome screen when no data is available"""
         try:
@@ -207,7 +243,7 @@ class FDOTCityExplorer:
         create_footer()
     
     def run(self):
-        """Run the main application"""
+        """Run the main application with simplified workflow"""
         try:
             # Configure page
             self.configure_page()
@@ -221,18 +257,16 @@ class FDOTCityExplorer:
             # Render sidebar and handle data fetching
             action, params = self.render_sidebar()
             
-            # Render main map
+            # Render main map with integrated controls
             self.render_main_map()
             
-            # Get cities from session
-            cities = self.city_controller.get_session_cities()
-            
-            if cities and len(cities) > 0:
-                # Render data tabs if cities are available
-                self.render_data_tabs()
-            else:
-                # Render welcome screen
-                self.render_welcome_screen()
+            # Optional: Show data panel if requested (triggered by Show Data button)
+            if st.session_state.get('show_data_panel', False):
+                cities = self.city_controller.get_session_cities()
+                if cities and len(cities) > 0:
+                    st.markdown("---")
+                    with st.expander("📊 Detailed Data Analysis", expanded=True):
+                        self.render_simplified_data_tabs(cities)
             
             # Render footer
             self.render_footer()

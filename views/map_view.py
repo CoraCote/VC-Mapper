@@ -83,7 +83,7 @@ class MapView:
     
     def display_cities_on_map(self, cities: CityCollection) -> None:
         """
-        Display cities on an enhanced interactive Mapbox map with options
+        Display cities on a simplified interactive Mapbox map following the new UI design
         
         Args:
             cities: Collection of cities to display
@@ -105,8 +105,416 @@ class MapView:
             if 'selected_city' not in st.session_state:
                 st.session_state.selected_city = None
             
-            # Map configuration options
-            selected_city, show_only_selected, show_streets, map_style, traffic_options = self._render_mapbox_controls(valid_cities)
+            # Render the new simplified UI layout
+            self._render_simplified_ui_layout(valid_cities)
+            
+        except Exception as e:
+            logger.error(f"Error displaying cities on map: {e}")
+            st.error("❌ Error displaying map. Please try refreshing the page.")
+            st.error(f"Details: {str(e)}")
+    
+    def _render_simplified_ui_layout(self, valid_cities: CityCollection) -> None:
+        """
+        Render the new simplified UI layout following the wireframe design
+        
+        Args:
+            valid_cities: Collection of valid cities to display
+        """
+        try:
+            # Top section: Simple selectors
+            st.markdown("### 📍 Select District, County, City")
+            self._render_location_selectors(valid_cities)
+            
+            st.markdown("---")
+            
+            # Main layout: Left controls + Right map
+            left_col, right_col = st.columns([1, 2])
+            
+            with left_col:
+                # Action buttons
+                st.markdown("#### 🎯 Actions")
+                self._render_action_buttons()
+                
+                st.markdown("---")
+                
+                # Statistical tables and important information
+                st.markdown("#### 📊 Statistical Information")
+                self._render_statistics_panel(valid_cities)
+                
+            with right_col:
+                # Main map area
+                st.markdown("#### 🗺️ Google Map")
+                self._render_main_map_area(valid_cities)
+                
+                # Map view settings at bottom right
+                st.markdown("---")
+                with st.container():
+                    st.markdown("##### ⚙️ Map View Settings")
+                    self._render_map_settings()
+                    
+        except Exception as e:
+            logger.error(f"Error rendering simplified UI layout: {e}")
+            st.error("❌ Error displaying interface")
+    
+    def _render_location_selectors(self, valid_cities: CityCollection) -> None:
+        """
+        Render simple district, county, city selectors
+        
+        Args:
+            valid_cities: Collection of cities for dropdown options
+        """
+        try:
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # Get unique districts (using state FIPS as district)
+                districts = list(set(city.state_fips for city in valid_cities.cities if city.state_fips))
+                selected_district = st.selectbox(
+                    "District",
+                    ["All Districts"] + sorted(districts),
+                    key="district_selector"
+                )
+            
+            with col2:
+                # County selector - simplified since county data may not be available
+                # Using place_fips as a proxy for county grouping
+                if selected_district == "All Districts":
+                    available_cities = valid_cities.cities
+                else:
+                    available_cities = [city for city in valid_cities.cities 
+                                     if city.state_fips == selected_district]
+                
+                # Extract county-like groupings from place_fips (first 3 digits typically represent county)
+                county_codes = list(set(city.place_fips[:3] if len(city.place_fips) >= 3 else 'N/A' 
+                                       for city in available_cities if city.place_fips))
+                if not county_codes or county_codes == ['N/A']:
+                    county_codes = ["No County Data"]
+                
+                selected_county = st.selectbox(
+                    "County Area", 
+                    ["All Areas"] + sorted(county_codes),
+                    key="county_selector",
+                    help="Grouped by place code prefix"
+                )
+            
+            with col3:
+                # Get cities based on selected district and county area
+                if selected_county == "All Areas":
+                    filtered_cities = available_cities
+                else:
+                    # Filter by place_fips prefix if county code is selected
+                    if selected_county != "No County Data":
+                        filtered_cities = [city for city in available_cities 
+                                         if city.place_fips.startswith(selected_county)]
+                    else:
+                        filtered_cities = available_cities
+                
+                city_options = ["All Cities"] + [city.get_display_name() for city in filtered_cities]
+                selected_city_option = st.selectbox(
+                    "City",
+                    city_options,
+                    key="city_selector"
+                )
+                
+                # Update session state with selected city
+                if selected_city_option != "All Cities":
+                    city_index = city_options.index(selected_city_option) - 1
+                    st.session_state.selected_city = filtered_cities[city_index].to_dict()
+                else:
+                    st.session_state.selected_city = None
+                    
+        except Exception as e:
+            logger.error(f"Error rendering location selectors: {e}")
+            st.error("Error in location selectors")
+    
+    def _render_action_buttons(self) -> None:
+        """
+        Render simple action buttons
+        """
+        try:
+            # Show data button
+            if st.button("📊 Show Data", use_container_width=True, type="primary"):
+                st.session_state.show_data_panel = True
+                st.rerun()
+            
+            # Toggle streets
+            show_streets = st.checkbox("🛣️ Show Streets", key="toggle_streets")
+            
+            # Toggle traffic
+            show_traffic = st.checkbox("🚦 Show Traffic", key="toggle_traffic")
+            
+            # Export buttons section
+            st.markdown("##### 💾 Export Data")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📄 Export GeoJSON", use_container_width=True, help="Download geographic data as GeoJSON"):
+                    self._export_geojson_data()
+            
+            with col2:
+                if st.button("📊 Export CSV", use_container_width=True, help="Download data as CSV spreadsheet"):
+                    self._export_csv_data()
+            
+            # Refresh data
+            if st.button("🔄 Refresh", use_container_width=True):
+                # Clear cache and refresh data
+                if 'traffic_data' in st.session_state:
+                    del st.session_state.traffic_data
+                st.rerun()
+                
+        except Exception as e:
+            logger.error(f"Error rendering action buttons: {e}")
+    
+    def _export_geojson_data(self) -> None:
+        """
+        Export current data as GeoJSON format
+        """
+        try:
+            # Get current data
+            cities = st.session_state.get('cities_data')
+            traffic_data = self.traffic_controller.get_session_traffic_data()
+            
+            if not cities and not traffic_data:
+                st.warning("⚠️ No data available to export")
+                return
+            
+            # Create GeoJSON structure
+            geojson_data = {
+                "type": "FeatureCollection",
+                "features": []
+            }
+            
+            # Add city data if available
+            if cities:
+                for city in cities.cities:
+                    if city.has_valid_coordinates():
+                        feature = {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [city.longitude, city.latitude]
+                            },
+                            "properties": {
+                                "name": city.name,
+                                "geoid": city.geoid,
+                                "population": city.population,
+                                "land_area": city.land_area,
+                                "water_area": city.water_area,
+                                "type": "city"
+                            }
+                        }
+                        geojson_data["features"].append(feature)
+            
+            # Add traffic data if available
+            if traffic_data:
+                for traffic in traffic_data.traffic_data:
+                    if traffic.coordinates and len(traffic.coordinates) > 1:
+                        feature = {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "LineString",
+                                "coordinates": traffic.coordinates
+                            },
+                            "properties": {
+                                "roadway_name": traffic.roadway_name,
+                                "aadt": traffic.aadt,
+                                "vc_ratio": traffic.calculate_vc_ratio(),
+                                "vc_level": traffic.get_vc_ratio_level(),
+                                "traffic_level": traffic.get_traffic_level(),
+                                "county": traffic.county,
+                                "year": traffic.year,
+                                "type": "traffic"
+                            }
+                        }
+                        geojson_data["features"].append(feature)
+            
+            # Convert to JSON string
+            import json
+            geojson_str = json.dumps(geojson_data, indent=2)
+            
+            # Create download button
+            st.download_button(
+                label="⬇️ Download GeoJSON",
+                data=geojson_str,
+                file_name=f"fdot_data_{len(geojson_data['features'])}_features.geojson",
+                mime="application/geo+json",
+                help=f"Download {len(geojson_data['features'])} geographic features"
+            )
+            
+            st.success(f"✅ GeoJSON ready for download with {len(geojson_data['features'])} features!")
+            
+        except Exception as e:
+            logger.error(f"Error exporting GeoJSON: {e}")
+            st.error(f"❌ Export failed: {str(e)}")
+    
+    def _export_csv_data(self) -> None:
+        """
+        Export current data as CSV format
+        """
+        try:
+            import pandas as pd
+            import io
+            
+            # Get current data
+            cities = st.session_state.get('cities_data')
+            traffic_data = self.traffic_controller.get_session_traffic_data()
+            
+            if not cities and not traffic_data:
+                st.warning("⚠️ No data available to export")
+                return
+            
+            # Create CSV data
+            csv_data = []
+            
+            # Add city data if available
+            if cities:
+                for city in cities.cities:
+                    csv_data.append({
+                        'Type': 'City',
+                        'Name': city.name,
+                        'GEOID': city.geoid,
+                        'Population': city.population,
+                        'Land Area (sq m)': city.land_area,
+                        'Water Area (sq m)': city.water_area,
+                        'Latitude': city.latitude,
+                        'Longitude': city.longitude,
+                        'State FIPS': city.state_fips,
+                        'AADT': '',
+                        'V/C Ratio': '',
+                        'Level of Service': '',
+                        'County': '',
+                        'Year': ''
+                    })
+            
+            # Add traffic data if available
+            if traffic_data:
+                for traffic in traffic_data.traffic_data:
+                    csv_data.append({
+                        'Type': 'Traffic',
+                        'Name': traffic.roadway_name,
+                        'GEOID': '',
+                        'Population': '',
+                        'Land Area (sq m)': '',
+                        'Water Area (sq m)': '',
+                        'Latitude': traffic.get_midpoint()[1] if traffic.get_midpoint() else '',
+                        'Longitude': traffic.get_midpoint()[0] if traffic.get_midpoint() else '',
+                        'State FIPS': '',
+                        'AADT': traffic.aadt,
+                        'V/C Ratio': round(traffic.calculate_vc_ratio(), 3),
+                        'Level of Service': traffic.get_vc_ratio_level(),
+                        'County': traffic.county,
+                        'Year': traffic.year
+                    })
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(csv_data)
+            
+            # Convert to CSV string
+            csv_buffer = io.StringIO()
+            df.to_csv(csv_buffer, index=False)
+            csv_str = csv_buffer.getvalue()
+            
+            # Create download button
+            st.download_button(
+                label="⬇️ Download CSV",
+                data=csv_str,
+                file_name=f"fdot_data_{len(csv_data)}_records.csv",
+                mime="text/csv",
+                help=f"Download {len(csv_data)} records as CSV"
+            )
+            
+            st.success(f"✅ CSV ready for download with {len(csv_data)} records!")
+            
+        except Exception as e:
+            logger.error(f"Error exporting CSV: {e}")
+            st.error(f"❌ Export failed: {str(e)}")
+    
+    def _render_statistics_panel(self, valid_cities: CityCollection) -> None:
+        """
+        Render clean statistics panel with important information
+        
+        Args:
+            valid_cities: Collection of cities for statistics
+        """
+        try:
+            # Basic statistics
+            with st.container():
+                st.metric("🏙️ Total Cities", len(valid_cities))
+                st.metric("👥 Total Population", f"{valid_cities.get_total_population():,}")
+                st.metric("🏞️ Total Area", f"{valid_cities.get_total_land_area()/1000000:.1f} km²")
+            
+            # Selected city details
+            if st.session_state.get('selected_city'):
+                city_data = st.session_state.selected_city
+                st.markdown("##### 🎯 Selected City")
+                with st.container():
+                    st.info(f"**{city_data.get('name', 'Unknown')}**")
+                    st.metric("Population", f"{city_data.get('population', 0):,}")
+                    st.metric("Area", f"{city_data.get('land_area', 0)/1000000:.2f} km²")
+            
+            # Traffic statistics if available
+            if st.session_state.get('toggle_traffic', False):
+                traffic_data = self.traffic_controller.get_session_traffic_data()
+                if traffic_data:
+                    stats = self.traffic_controller.get_traffic_statistics(traffic_data)
+                    st.markdown("##### 🚦 Traffic Data")
+                    st.metric("Segments", stats.get('total_segments', 0))
+                    st.metric("Avg Volume", f"{stats.get('avg_volume', 0):,.0f}")
+                    
+                    # Add V/C Ratio Color Legend
+                    with st.expander("🎨 V/C Ratio Color Legend", expanded=False):
+                        st.markdown("""
+                        <div style="font-size: 11px;">
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(139,0,0); margin-right: 6px;"></div>
+                            <span>V/C ≥ 1.0 - LOS F (Oversaturated)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(255,0,0); margin-right: 6px;"></div>
+                            <span>V/C ≥ 0.85 - LOS E (Forced Flow)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(255,69,0); margin-right: 6px;"></div>
+                            <span>V/C ≥ 0.70 - LOS D (High Density)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(255,140,0); margin-right: 6px;"></div>
+                            <span>V/C ≥ 0.55 - LOS C (Stable Flow)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(255,215,0); margin-right: 6px;"></div>
+                            <span>V/C ≥ 0.35 - LOS B (Free Flow)</span>
+                        </div>
+                        <div style="display: flex; align-items: center; margin: 2px 0;">
+                            <div style="width: 15px; height: 4px; background: rgb(0,255,0); margin-right: 6px;"></div>
+                            <span>V/C < 0.35 - LOS A (Free Flow)</span>
+                        </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+        except Exception as e:
+            logger.error(f"Error rendering statistics panel: {e}")
+    
+    def _render_main_map_area(self, valid_cities: CityCollection) -> None:
+        """
+        Render the main map area
+        
+        Args:
+            valid_cities: Collection of cities to display on map
+        """
+        try:
+            # Get current settings
+            selected_city = None
+            if st.session_state.get('selected_city'):
+                # Find the city object from session state
+                city_data = st.session_state.selected_city
+                for city in valid_cities.cities:
+                    if city.geoid == city_data.get('geoid'):
+                        selected_city = city
+                        break
+            
+            show_streets = st.session_state.get('toggle_streets', False)
+            show_traffic = st.session_state.get('toggle_traffic', False)
             
             # Get streets data if needed
             streets = None
@@ -115,36 +523,66 @@ class MapView:
                 street_controller = StreetController()
                 streets = street_controller.get_streets_for_city(selected_city)
             
-            # Get traffic data if needed
+            # Get traffic data if needed - automatically fetch when traffic is enabled
             traffic_data = None
-            if traffic_options['show_traffic_data']:
-                traffic_data = self._get_or_fetch_traffic_data(
-                    county_filter=traffic_options.get('county_filter'),
-                    roadway_filter=traffic_options.get('roadway_filter'),
-                    max_records=traffic_options.get('max_records'),  # Remove default limit
-                    force_refresh=traffic_options.get('force_refresh', False)
-                )
+            if show_traffic:
+                with st.spinner("🚦 Loading traffic data..."):
+                    traffic_data = self._get_or_fetch_traffic_data(force_refresh=False)
             
-            # Create Mapbox map
+            # Get map style from settings
+            map_style = st.session_state.get('map_style_selector', 'mapbox://styles/mapbox/streets-v11')
+            
+            # Create map with simplified settings
             deck = self.mapbox_controller.create_florida_map(
                 cities=valid_cities,
                 selected_city=selected_city,
                 streets=streets,
                 traffic_data=traffic_data,
-                show_traffic=traffic_options['show_traffic_data'],
-                show_traffic_heatmap=traffic_options.get('show_heatmap', False),
-                traffic_filter_level=traffic_options.get('traffic_level_filter'),
-                show_only_selected=show_only_selected,
+                show_traffic=show_traffic,
+                show_only_selected=(selected_city is not None),
                 map_style=map_style
             )
             
-            # Display map with statistics
-            self._display_mapbox_with_stats(deck, valid_cities, selected_city)
+            # Display the map
+            st.pydeck_chart(deck, use_container_width=True, height=500)
             
         except Exception as e:
-            logger.error(f"Error displaying cities on map: {e}")
-            st.error("❌ Error displaying map. Please try refreshing the page.")
-            st.error(f"Details: {str(e)}")
+            logger.error(f"Error rendering main map area: {e}")
+            st.error("Error displaying map")
+    
+    def _render_map_settings(self) -> None:
+        """
+        Render simple map view settings and filter options at bottom right
+        """
+        try:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Map style selector
+                map_style = st.selectbox(
+                    "Map Style",
+                    options=[
+                        'mapbox://styles/mapbox/streets-v11',
+                        'mapbox://styles/mapbox/satellite-v9',
+                        'mapbox://styles/mapbox/light-v10',
+                        'mapbox://styles/mapbox/dark-v10'
+                    ],
+                    format_func=lambda x: {
+                        'mapbox://styles/mapbox/streets-v11': 'Streets',
+                        'mapbox://styles/mapbox/satellite-v9': 'Satellite',
+                        'mapbox://styles/mapbox/light-v10': 'Light',
+                        'mapbox://styles/mapbox/dark-v10': 'Dark'
+                    }[x],
+                    key="map_style_selector"
+                )
+            
+            with col2:
+                # Simple filter options
+                zoom_to_selection = st.checkbox("🎯 Zoom to Selection", key="zoom_to_selection")
+                show_labels = st.checkbox("🏷️ Show Labels", value=True, key="show_labels")
+                
+        except Exception as e:
+            logger.error(f"Error rendering map settings: {e}")
     
     def _render_mapbox_controls(self, valid_cities: CityCollection) -> tuple:
         """

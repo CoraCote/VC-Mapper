@@ -365,7 +365,7 @@ class CityController:
     
     def _search_cities_from_api(self, query: str, limit: Optional[int] = 10) -> List[Dict]:
         """
-        Search for cities by name using FDOT GIS API
+        Search for cities by name using FDOT GIS API with enhanced search capabilities
         
         Args:
             query: Search query string
@@ -375,8 +375,24 @@ class CityController:
             List of matching city dictionaries
         """
         try:
-            # Build search query - use LIKE for fuzzy matching
-            where_clause = f"NAME LIKE '%{query.upper()}%' OR FULLNAME LIKE '%{query.upper()}%'"
+            # Clean and prepare search query
+            query_clean = query.strip()
+            if not query_clean:
+                return []
+            
+            # Build multiple search patterns for better results
+            # Try exact match first, then partial matches
+            search_patterns = [
+                f"NAME = '{query_clean.upper()}'",  # Exact match (case insensitive)
+                f"FULLNAME = '{query_clean.upper()}'",  # Exact match on full name
+                f"NAME LIKE '{query_clean.upper()}%'",  # Starts with query
+                f"FULLNAME LIKE '{query_clean.upper()}%'",  # Starts with query in full name
+                f"NAME LIKE '%{query_clean.upper()}%'",  # Contains query anywhere
+                f"FULLNAME LIKE '%{query_clean.upper()}%'"  # Contains query anywhere in full name
+            ]
+            
+            # Combine all patterns with OR
+            where_clause = " OR ".join(search_patterns)
             
             params = {
                 'where': where_clause,
@@ -388,7 +404,7 @@ class CityController:
             if limit:
                 params['resultRecordCount'] = limit
             
-            logger.info(f"Searching cities with query '{query}' using params: {params}")
+            logger.info(f"Searching cities with query '{query_clean}' using enhanced search patterns")
             
             # Make the API request
             response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
@@ -398,19 +414,38 @@ class CityController:
             data = response.json()
             
             if 'features' not in data:
-                logger.warning(f"No features found for search query: {query}")
+                logger.warning(f"No features found for search query: {query_clean}")
                 return []
             
             # Extract and format city data
             cities = []
+            seen_geoids = set()  # Prevent duplicates
+            
             for feature in data['features']:
                 if 'attributes' in feature:
                     city_data = self._format_city_data(feature)
-                    if city_data:
+                    if city_data and city_data['geoid'] not in seen_geoids:
                         cities.append(city_data)
+                        seen_geoids.add(city_data['geoid'])
             
-            logger.info(f"Found {len(cities)} cities matching '{query}'")
-            return cities
+            # Sort results by relevance - exact matches first, then partial matches
+            cities_sorted = sorted(cities, key=lambda x: (
+                # Primary sort: exact match gets priority
+                0 if x['name'].upper() == query_clean.upper() else 1,
+                # Secondary sort: starts with gets priority over contains
+                0 if x['name'].upper().startswith(query_clean.upper()) else 1,
+                # Tertiary sort: alphabetical
+                x['name']
+            ))
+            
+            logger.info(f"Found {len(cities_sorted)} unique cities matching '{query_clean}'")
+            
+            # Log first few results for debugging
+            if cities_sorted:
+                result_names = [city['name'] for city in cities_sorted[:5]]
+                logger.info(f"Top results: {result_names}")
+            
+            return cities_sorted
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Error searching cities: {e}")

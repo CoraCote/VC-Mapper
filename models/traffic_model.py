@@ -267,6 +267,112 @@ class TrafficData:
         else:
             return 1       # Minimal width for extremely low traffic
     
+    def calculate_vc_ratio(self, capacity: Optional[int] = None) -> float:
+        """
+        Calculate Volume/Capacity (V/C) ratio for traffic analysis
+        
+        Args:
+            capacity: Road capacity. If None, estimates based on AADT and facility type
+            
+        Returns:
+            V/C ratio (0.0 to 1.0+, where >1.0 indicates oversaturation)
+        """
+        try:
+            if capacity is None:
+                # Estimate capacity based on typical values for different road types
+                # These are conservative estimates for Florida roads
+                if 'I-' in self.roadway_code.upper() or 'INTERSTATE' in self.roadway_code.upper():
+                    # Interstate: ~2000 vehicles per lane per hour, assume 4 lanes minimum
+                    estimated_capacity = 190000  # Conservative estimate for interstate
+                elif 'US-' in self.roadway_code.upper() or 'SR-' in self.roadway_code.upper():
+                    # Major arterials: assume 2-4 lanes
+                    estimated_capacity = 95000   # Conservative estimate for major arterials
+                elif 'CR-' in self.roadway_code.upper() or 'COUNTY' in self.roadway_code.upper():
+                    # County roads: assume 2 lanes
+                    estimated_capacity = 47500   # Conservative estimate for county roads
+                else:
+                    # Local roads: assume 2 lanes, lower capacity
+                    estimated_capacity = 30000   # Conservative estimate for local roads
+                
+                capacity = estimated_capacity
+            
+            # V/C ratio = Current Volume / Design Capacity
+            vc_ratio = self.aadt / capacity if capacity > 0 else 0.0
+            
+            # Cap at reasonable maximum (some roads can exceed 100% capacity)
+            return min(vc_ratio, 2.0)
+            
+        except Exception as e:
+            logger.warning(f"Error calculating V/C ratio: {e}")
+            return 0.0
+    
+    def get_vc_ratio_level(self) -> str:
+        """
+        Get service level description based on V/C ratio
+        
+        Returns:
+            Level of Service description based on V/C ratio
+        """
+        vc_ratio = self.calculate_vc_ratio()
+        
+        if vc_ratio >= 1.0:
+            return "F - Oversaturated"
+        elif vc_ratio >= 0.85:
+            return "E - Forced Flow"
+        elif vc_ratio >= 0.70:
+            return "D - High Density"
+        elif vc_ratio >= 0.55:
+            return "C - Stable Flow"
+        elif vc_ratio >= 0.35:
+            return "B - Reasonably Free Flow"
+        else:
+            return "A - Free Flow"
+    
+    def get_color_by_vc_ratio(self) -> List[int]:
+        """
+        Get color representation based on V/C ratio for better traffic analysis
+        
+        Returns:
+            RGB color values [R, G, B, Alpha] based on V/C ratio
+        """
+        vc_ratio = self.calculate_vc_ratio()
+        
+        # Color scheme based on Level of Service (LOS) standards
+        if vc_ratio >= 1.0:
+            return [139, 0, 0, 220]      # Dark Red - LOS F (Oversaturated)
+        elif vc_ratio >= 0.85:
+            return [255, 0, 0, 200]      # Red - LOS E (Forced Flow)
+        elif vc_ratio >= 0.70:
+            return [255, 69, 0, 180]     # Orange Red - LOS D (High Density)
+        elif vc_ratio >= 0.55:
+            return [255, 140, 0, 160]    # Orange - LOS C (Stable Flow)
+        elif vc_ratio >= 0.35:
+            return [255, 215, 0, 140]    # Gold - LOS B (Reasonably Free Flow)
+        else:
+            return [0, 255, 0, 120]      # Green - LOS A (Free Flow)
+    
+    def get_line_width_by_vc_ratio(self) -> int:
+        """
+        Get line width based on V/C ratio
+        
+        Returns:
+            Line width for map visualization based on congestion level
+        """
+        vc_ratio = self.calculate_vc_ratio()
+        
+        if vc_ratio >= 1.0:
+            return 8       # Very thick for oversaturated
+        elif vc_ratio >= 0.85:
+            return 7       # Thick for forced flow
+        elif vc_ratio >= 0.70:
+            return 6       # Medium-thick for high density
+        elif vc_ratio >= 0.55:
+            return 5       # Medium for stable flow
+        elif vc_ratio >= 0.35:
+            return 4       # Medium-thin for reasonably free flow
+        else:
+            return 3       # Thin for free flow
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert traffic data to dictionary format"""
         return {

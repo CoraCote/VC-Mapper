@@ -551,16 +551,20 @@ class MapboxController:
                 # Convert coordinates to [lat, lon] format for PyDeck
                 path_coords = [[coord[1], coord[0]] for coord in traffic.coordinates]
                 
-                # Get visualization properties
-                color = traffic.get_color_by_traffic_level()
-                width = traffic.get_line_width_by_volume() if show_volume else 3
+                # Get visualization properties based on V/C ratio for better traffic analysis
+                color = traffic.get_color_by_vc_ratio()
+                width = traffic.get_line_width_by_vc_ratio() if show_volume else 3
+                vc_ratio = traffic.calculate_vc_ratio()
+                vc_level = traffic.get_vc_ratio_level()
                 
-                # Create data point for visualization with enhanced AADT information
+                # Create data point for visualization with enhanced AADT and V/C ratio information
                 traffic_viz_data.append({
                     'path': path_coords,
                     'roadway_name': traffic.roadway_name,
                     'traffic_volume': traffic.aadt,  # Use AADT value
                     'aadt': traffic.aadt,
+                    'vc_ratio': vc_ratio,
+                    'vc_level': vc_level,
                     'average_speed': traffic.average_speed,
                     'speed_limit': traffic.speed_limit,
                     'speed_ratio': traffic.speed_ratio,
@@ -586,10 +590,11 @@ class MapboxController:
             # Convert to DataFrame
             df = pd.DataFrame(traffic_viz_data)
             
-            # Create enhanced tooltip for AADT data
+            # Create enhanced tooltip for AADT data with V/C ratio information
             tooltip_html = """
             <b>🛣️ {roadway_name}</b><br/>
-            <b>📊 Traffic Level:</b> {traffic_level}<br/>
+            <b>📊 Level of Service:</b> {vc_level}<br/>
+            <b>⚖️ V/C Ratio:</b> {vc_ratio:.2f}<br/>
             <b>🚗 AADT:</b> {traffic_volume:,} vehicles/day<br/>
             <b>📈 Volume Category:</b> {volume_category}<br/>
             <b>📍 County:</b> {county}<br/>

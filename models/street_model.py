@@ -89,8 +89,39 @@ class Street:
         """Get formatted traffic level for display"""
         return self.traffic_level.replace('_', ' ').title()
     
+    def get_coordinates(self) -> Optional[List]:
+        """
+        Extract coordinates from geometry for map display
+        
+        Returns:
+            List of coordinates or None if invalid geometry
+        """
+        try:
+            if not self.has_valid_geometry():
+                return None
+            
+            coords = self.geometry.get('coordinates', [])
+            if not coords:
+                return None
+            
+            # Handle both LineString and MultiLineString
+            if self.geometry.get('type') == 'LineString':
+                # LineString: coordinates are [lon, lat] pairs
+                return [[lon, lat] for lon, lat in coords]
+            elif self.geometry.get('type') == 'MultiLineString':
+                # MultiLineString: array of LineString coordinates
+                # Flatten all line segments into one coordinate list
+                all_coords = []
+                for line_coords in coords:
+                    all_coords.extend([[lon, lat] for lon, lat in line_coords])
+                return all_coords
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting coordinates from street geometry: {e}")
+            return None
 
-    
     def create_popup_html(self) -> str:
         """Create HTML popup content for map display"""
         return f"""
