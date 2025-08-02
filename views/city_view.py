@@ -550,28 +550,74 @@ class CityView:
                     import io
                     from openpyxl import Workbook
                     from openpyxl.utils.dataframe import dataframe_to_rows
+                    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                    from openpyxl.utils import get_column_letter
                     
                     # Create Excel workbook
                     wb = Workbook()
                     ws = wb.active
                     ws.title = f"{data_type}"
                     
-                    # Add data to worksheet
-                    for r in dataframe_to_rows(df, index=False, header=True):
-                        ws.append(r)
+                    # Define styles
+                    header_font = Font(bold=True, color="FFFFFF")
+                    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                    header_alignment = Alignment(horizontal="center", vertical="center")
                     
-                    # Auto-adjust column widths
+                    data_font = Font(size=10)
+                    data_alignment = Alignment(horizontal="left", vertical="center")
+                    
+                    border = Border(
+                        left=Side(style='thin'),
+                        right=Side(style='thin'),
+                        top=Side(style='thin'),
+                        bottom=Side(style='thin')
+                    )
+                    
+                    # Add data to worksheet
+                    rows = list(dataframe_to_rows(df, index=False, header=True))
+                    
+                    # Add header row with styling
+                    for col_idx, value in enumerate(rows[0], 1):
+                        cell = ws.cell(row=1, column=col_idx, value=value)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                        cell.border = border
+                    
+                    # Add data rows with styling
+                    for row_idx, row in enumerate(rows[1:], 2):
+                        for col_idx, value in enumerate(row, 1):
+                            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                            cell.font = data_font
+                            cell.alignment = data_alignment
+                            cell.border = border
+                    
+                    # Auto-adjust column widths with better calculation
                     for column in ws.columns:
                         max_length = 0
-                        column_letter = column[0].column_letter
+                        column_letter = get_column_letter(column[0].column)
+                        
                         for cell in column:
                             try:
-                                if len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
+                                cell_length = len(str(cell.value)) if cell.value else 0
+                                if cell_length > max_length:
+                                    max_length = cell_length
                             except:
                                 pass
-                        adjusted_width = min(max_length + 2, 50)
+                        
+                        # Set column width (minimum 10, maximum 50)
+                        adjusted_width = min(max(max_length + 2, 10), 50)
                         ws.column_dimensions[column_letter].width = adjusted_width
+                    
+                    # Add summary information
+                    summary_row = len(rows) + 2
+                    ws.cell(row=summary_row, column=1, value="Summary Information").font = Font(bold=True, size=12)
+                    ws.cell(row=summary_row + 1, column=1, value=f"Total Records: {len(df)}")
+                    ws.cell(row=summary_row + 2, column=1, value=f"Export Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    ws.cell(row=summary_row + 3, column=1, value=f"Data Type: {data_type}")
+                    
+                    # Freeze the header row
+                    ws.freeze_panes = "A2"
                     
                     # Save to bytes
                     excel_buffer = io.BytesIO()
@@ -583,7 +629,7 @@ class CityView:
                         data=excel_data,
                         file_name=f"{data_key}_data_{len(df)}_records.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        help=f"Download {data_type} as Excel file",
+                        help=f"Download {data_type} as formatted Excel file with styling",
                         use_container_width=True
                     )
                     
@@ -610,6 +656,185 @@ class CityView:
         except Exception as e:
             logger.error(f"Error adding export buttons: {e}")
             st.error("❌ Export functionality failed")
+    
+    def create_standalone_excel_export(self, df: pd.DataFrame, data_type: str, data_key: str) -> None:
+        """
+        Create a standalone Excel export function with enhanced formatting
+        
+        Args:
+            df: DataFrame to export
+            data_type: Type of data (e.g., "City Data", "Traffic Data")
+            data_key: Key for unique file naming
+        """
+        try:
+            if df.empty:
+                st.warning("⚠️ No data available for Excel export")
+                return
+            
+            st.markdown("#### 📊 Enhanced Excel Export")
+            
+            # Create export options
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Basic Excel export
+                try:
+                    import io
+                    from openpyxl import Workbook
+                    from openpyxl.utils.dataframe import dataframe_to_rows
+                    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                    from openpyxl.utils import get_column_letter
+                    
+                    # Create Excel workbook with multiple sheets
+                    wb = Workbook()
+                    
+                    # Main data sheet
+                    ws_data = wb.active
+                    ws_data.title = "Data"
+                    
+                    # Add data with styling
+                    rows = list(dataframe_to_rows(df, index=False, header=True))
+                    
+                    # Style definitions
+                    header_font = Font(bold=True, color="FFFFFF", size=12)
+                    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                    header_alignment = Alignment(horizontal="center", vertical="center")
+                    
+                    data_font = Font(size=10)
+                    data_alignment = Alignment(horizontal="left", vertical="center")
+                    
+                    border = Border(
+                        left=Side(style='thin'),
+                        right=Side(style='thin'),
+                        top=Side(style='thin'),
+                        bottom=Side(style='thin')
+                    )
+                    
+                    # Add header row
+                    for col_idx, value in enumerate(rows[0], 1):
+                        cell = ws_data.cell(row=1, column=col_idx, value=value)
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+                        cell.border = border
+                    
+                    # Add data rows
+                    for row_idx, row in enumerate(rows[1:], 2):
+                        for col_idx, value in enumerate(row, 1):
+                            cell = ws_data.cell(row=row_idx, column=col_idx, value=value)
+                            cell.font = data_font
+                            cell.alignment = data_alignment
+                            cell.border = border
+                    
+                    # Auto-adjust column widths
+                    for column in ws_data.columns:
+                        max_length = 0
+                        column_letter = get_column_letter(column[0].column)
+                        
+                        for cell in column:
+                            try:
+                                cell_length = len(str(cell.value)) if cell.value else 0
+                                if cell_length > max_length:
+                                    max_length = cell_length
+                            except:
+                                pass
+                        
+                        adjusted_width = min(max(max_length + 2, 10), 50)
+                        ws_data.column_dimensions[column_letter].width = adjusted_width
+                    
+                    # Add summary sheet
+                    ws_summary = wb.create_sheet("Summary")
+                    ws_summary.cell(row=1, column=1, value="Data Summary").font = Font(bold=True, size=14)
+                    ws_summary.cell(row=2, column=1, value=f"Data Type: {data_type}")
+                    ws_summary.cell(row=3, column=1, value=f"Total Records: {len(df)}")
+                    ws_summary.cell(row=4, column=1, value=f"Export Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    ws_summary.cell(row=5, column=1, value=f"Columns: {len(df.columns)}")
+                    
+                    # Add statistics if numeric columns exist
+                    numeric_cols = df.select_dtypes(include=['number']).columns
+                    if len(numeric_cols) > 0:
+                        ws_summary.cell(row=7, column=1, value="Column Statistics").font = Font(bold=True, size=12)
+                        row_num = 8
+                        for col in numeric_cols[:5]:  # Limit to first 5 numeric columns
+                            ws_summary.cell(row=row_num, column=1, value=f"{col}:")
+                            ws_summary.cell(row=row_num, column=2, value=f"Mean: {df[col].mean():.2f}")
+                            ws_summary.cell(row=row_num + 1, column=2, value=f"Max: {df[col].max()}")
+                            ws_summary.cell(row=row_num + 2, column=2, value=f"Min: {df[col].min()}")
+                            row_num += 4
+                    
+                    # Freeze header row
+                    ws_data.freeze_panes = "A2"
+                    
+                    # Save to bytes
+                    excel_buffer = io.BytesIO()
+                    wb.save(excel_buffer)
+                    excel_data = excel_buffer.getvalue()
+                    
+                    st.download_button(
+                        label="📊 Download Enhanced Excel",
+                        data=excel_data,
+                        file_name=f"{data_key}_enhanced_{len(df)}_records.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        help=f"Download {data_type} as enhanced Excel file with multiple sheets and formatting",
+                        use_container_width=True
+                    )
+                    
+                except ImportError:
+                    st.warning("⚠️ Excel export requires openpyxl. Install with: pip install openpyxl")
+                except Exception as e:
+                    logger.error(f"Error creating enhanced Excel export: {e}")
+                    st.error("❌ Enhanced Excel export failed")
+            
+            with col2:
+                # Quick Excel export (basic)
+                try:
+                    import io
+                    from openpyxl import Workbook
+                    from openpyxl.utils.dataframe import dataframe_to_rows
+                    
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.title = "Data"
+                    
+                    # Simple data export
+                    for r in dataframe_to_rows(df, index=False, header=True):
+                        ws.append(r)
+                    
+                    # Basic column width adjustment
+                    for column in ws.columns:
+                        max_length = 0
+                        column_letter = get_column_letter(column[0].column)
+                        for cell in column:
+                            try:
+                                cell_length = len(str(cell.value)) if cell.value else 0
+                                if cell_length > max_length:
+                                    max_length = cell_length
+                            except:
+                                pass
+                        ws.column_dimensions[column_letter].width = min(max_length + 2, 30)
+                    
+                    excel_buffer = io.BytesIO()
+                    wb.save(excel_buffer)
+                    excel_data = excel_buffer.getvalue()
+                    
+                    st.download_button(
+                        label="📄 Download Basic Excel",
+                        data=excel_data,
+                        file_name=f"{data_key}_basic_{len(df)}_records.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        help=f"Download {data_type} as basic Excel file",
+                        use_container_width=True
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error creating basic Excel export: {e}")
+                    st.error("❌ Basic Excel export failed")
+            
+            st.success(f"✅ Excel export options available for {len(df)} records!")
+            
+        except Exception as e:
+            logger.error(f"Error creating standalone Excel export: {e}")
+            st.error("❌ Excel export functionality failed")
     
     def _create_traffic_charts(self, traffic_df: pd.DataFrame) -> None:
         """

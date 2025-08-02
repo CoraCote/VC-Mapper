@@ -116,10 +116,11 @@ class FDOTCityExplorer:
             st.markdown("---")
             
             # Create simplified tabs for core functionality
-            tab1, tab2, tab3 = st.tabs([
+            tab1, tab2, tab3, tab4 = st.tabs([
                 "📊 City Data", 
                 "📈 Analytics",
-                "🚦 Traffic Data"
+                "🚦 Traffic Data",
+                "💾 Excel Export"
             ])
             
             with tab1:
@@ -130,6 +131,9 @@ class FDOTCityExplorer:
             
             with tab3:
                 self.render_traffic_data_tab()
+            
+            with tab4:
+                self.render_excel_export_tab(cities)
                 
         except Exception as e:
             logger.error(f"Error rendering data tabs: {e}")
@@ -194,6 +198,148 @@ class FDOTCityExplorer:
         except Exception as e:
             logger.error(f"Error rendering traffic data tab: {e}")
             st.error("❌ Error displaying traffic data")
+    
+    def render_excel_export_tab(self, cities: CityCollection):
+        """Render the Excel export tab"""
+        try:
+            st.markdown("### 💾 Excel Export Center")
+            st.info("📊 Export your data in professional Excel format with enhanced formatting and multiple sheets.")
+            
+            # City Data Export
+            if cities and len(cities) > 0:
+                st.markdown("#### 🏙️ City Data Export")
+                df_cities = cities.to_dataframe()
+                self.city_view.create_standalone_excel_export(df_cities, "City Data", "cities")
+            
+            # Traffic Data Export
+            traffic_data = st.session_state.get('traffic_data')
+            if traffic_data and 'features' in traffic_data:
+                st.markdown("#### 🚦 Traffic Data Export")
+                from models.city_model import TrafficDataCollection
+                traffic_collection = TrafficDataCollection(traffic_data)
+                df_traffic = traffic_collection.to_dataframe()
+                self.city_view.create_standalone_excel_export(df_traffic, "Traffic Data", "traffic")
+            
+            # Combined Export Option
+            if (cities and len(cities) > 0) and (traffic_data and 'features' in traffic_data):
+                st.markdown("#### 🔗 Combined Data Export")
+                st.info("💡 Export both city and traffic data in a single Excel file with multiple sheets.")
+                
+                if st.button("📊 Create Combined Excel Export", type="primary", use_container_width=True):
+                    try:
+                        import io
+                        from openpyxl import Workbook
+                        from openpyxl.utils.dataframe import dataframe_to_rows
+                        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                        from openpyxl.utils import get_column_letter
+                        
+                        wb = Workbook()
+                        
+                        # City Data Sheet
+                        ws_cities = wb.active
+                        ws_cities.title = "City Data"
+                        df_cities = cities.to_dataframe()
+                        
+                        # Add city data with styling
+                        rows_cities = list(dataframe_to_rows(df_cities, index=False, header=True))
+                        
+                        # Style definitions
+                        header_font = Font(bold=True, color="FFFFFF", size=12)
+                        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                        header_alignment = Alignment(horizontal="center", vertical="center")
+                        data_font = Font(size=10)
+                        data_alignment = Alignment(horizontal="left", vertical="center")
+                        border = Border(left=Side(style='thin'), right=Side(style='thin'), 
+                                     top=Side(style='thin'), bottom=Side(style='thin'))
+                        
+                        # Add city data
+                        for col_idx, value in enumerate(rows_cities[0], 1):
+                            cell = ws_cities.cell(row=1, column=col_idx, value=value)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = header_alignment
+                            cell.border = border
+                        
+                        for row_idx, row in enumerate(rows_cities[1:], 2):
+                            for col_idx, value in enumerate(row, 1):
+                                cell = ws_cities.cell(row=row_idx, column=col_idx, value=value)
+                                cell.font = data_font
+                                cell.alignment = data_alignment
+                                cell.border = border
+                        
+                        # Traffic Data Sheet
+                        ws_traffic = wb.create_sheet("Traffic Data")
+                        traffic_collection = TrafficDataCollection(traffic_data)
+                        df_traffic = traffic_collection.to_dataframe()
+                        rows_traffic = list(dataframe_to_rows(df_traffic, index=False, header=True))
+                        
+                        # Add traffic data
+                        for col_idx, value in enumerate(rows_traffic[0], 1):
+                            cell = ws_traffic.cell(row=1, column=col_idx, value=value)
+                            cell.font = header_font
+                            cell.fill = header_fill
+                            cell.alignment = header_alignment
+                            cell.border = border
+                        
+                        for row_idx, row in enumerate(rows_traffic[1:], 2):
+                            for col_idx, value in enumerate(row, 1):
+                                cell = ws_traffic.cell(row=row_idx, column=col_idx, value=value)
+                                cell.font = data_font
+                                cell.alignment = data_alignment
+                                cell.border = border
+                        
+                        # Summary Sheet
+                        ws_summary = wb.create_sheet("Summary")
+                        ws_summary.cell(row=1, column=1, value="FDOT Data Export Summary").font = Font(bold=True, size=16)
+                        ws_summary.cell(row=3, column=1, value=f"Export Date: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        ws_summary.cell(row=4, column=1, value=f"City Records: {len(df_cities)}")
+                        ws_summary.cell(row=5, column=1, value=f"Traffic Records: {len(df_traffic)}")
+                        ws_summary.cell(row=6, column=1, value=f"Total Records: {len(df_cities) + len(df_traffic)}")
+                        
+                        # Auto-adjust column widths for all sheets
+                        for ws in [ws_cities, ws_traffic]:
+                            for column in ws.columns:
+                                max_length = 0
+                                column_letter = get_column_letter(column[0].column)
+                                for cell in column:
+                                    try:
+                                        cell_length = len(str(cell.value)) if cell.value else 0
+                                        if cell_length > max_length:
+                                            max_length = cell_length
+                                    except:
+                                        pass
+                                ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 50)
+                        
+                        # Freeze header rows
+                        ws_cities.freeze_panes = "A2"
+                        ws_traffic.freeze_panes = "A2"
+                        
+                        # Save to bytes
+                        excel_buffer = io.BytesIO()
+                        wb.save(excel_buffer)
+                        excel_data = excel_buffer.getvalue()
+                        
+                        st.download_button(
+                            label="📊 Download Combined Excel",
+                            data=excel_data,
+                            file_name=f"fdot_combined_data_{len(df_cities)}_{len(df_traffic)}_records.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            help="Download combined city and traffic data as Excel file",
+                            use_container_width=True
+                        )
+                        
+                        st.success("✅ Combined Excel file ready for download!")
+                        
+                    except Exception as e:
+                        logger.error(f"Error creating combined Excel export: {e}")
+                        st.error("❌ Combined Excel export failed")
+            
+            if not cities and not traffic_data:
+                st.warning("⚠️ No data available for export. Please fetch city and/or traffic data first.")
+                
+        except Exception as e:
+            logger.error(f"Error rendering Excel export tab: {e}")
+            st.error("❌ Error displaying Excel export options")
     
 
     
