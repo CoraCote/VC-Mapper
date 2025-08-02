@@ -15,5 +15,7 @@ pip-delete-this-directory.txt
 *.sqlite3
 .DS_Store
 .idea/
-.vscode/
 *.log 
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore

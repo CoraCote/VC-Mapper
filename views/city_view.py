@@ -46,20 +46,67 @@ class CityView:
                 if action == "🌍 Fetch All Cities":
                     st.info("⚠️ Will fetch ALL cities from the database (no limit). This may take some time...")
                     
-                    save_to_file = st.checkbox(
-                        "Save to JSON file",
-                        value=True,  # Auto-checked by default
-                        help="Save the fetched cities data to a local JSON file"
-                    )
+                    # Check if local data exists
+                    local_data_exists = self._check_local_cities_data()
                     
-                    fetch_button = st.button("🚀 FETCH ALL CITIES", type="primary", use_container_width=True)
-                    params = {
-                        "limit": None,  # Always no limit
-                        "button": fetch_button, 
-                        "fetch_all": True,  # Always fetch all
-                        "save_to_file": save_to_file,
-                        "fetch_traffic": True
-                    }
+                    # Create two columns for fetch options
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Fetch from Local option
+                        fetch_local_disabled = not local_data_exists
+                        fetch_local_button = st.button(
+                            "📂 Use Fetched Data",
+                            type="secondary",
+                            use_container_width=True,
+                            disabled=fetch_local_disabled,
+                            help="Load cities data from fetched JSON file" if not fetch_local_disabled else "No fetched data available"
+                        )
+                        
+                        if fetch_local_disabled:
+                            st.caption("❌ No local data found")
+                        else:
+                            st.caption("✅ Local data available")
+                    
+                    with col2:
+                        # Fetch from Service option
+                        fetch_service_button = st.button(
+                            "🌐 Update Data",
+                            type="primary",
+                            use_container_width=True,
+                            help="Fetch fresh cities data from FDOT API"
+                        )
+                    
+                    # Settings for service fetch
+                    if fetch_service_button:
+                        st.markdown("#### ⚙️ Service Fetch Settings")
+                        save_to_file = st.checkbox(
+                            "Save to JSON file",
+                            value=True,  # Auto-checked by default
+                            help="Save the fetched cities data to a local JSON file"
+                        )
+                        
+                        fetch_traffic = st.checkbox(
+                            "Fetch traffic data",
+                            value=True,
+                            help="Also fetch traffic data from FDOT API"
+                        )
+                        
+                        params = {
+                            "limit": None,  # Always no limit
+                            "button": fetch_service_button, 
+                            "fetch_all": True,  # Always fetch all
+                            "save_to_file": save_to_file,
+                            "fetch_traffic": fetch_traffic,
+                            "fetch_source": "service"
+                        }
+                    elif fetch_local_button:
+                        params = {
+                            "button": fetch_local_button,
+                            "fetch_source": "local"
+                        }
+                    else:
+                        params = {"button": False}
 
                 elif action == "🔍 Search Cities":
                     search_query = st.text_input(
@@ -385,6 +432,36 @@ class CityView:
                 
         except Exception as e:
             logger.error(f"Error displaying top cities showcase: {e}")
+    
+    def _check_local_cities_data(self) -> bool:
+        """
+        Check if local cities data exists
+        
+        Returns:
+            True if local data exists, False otherwise
+        """
+        try:
+            import os
+            import json
+            
+            # Look for cities data file in the data directory
+            data_dir = "data"
+            cities_file = os.path.join(data_dir, "cities_data.json")
+            
+            if not os.path.exists(cities_file):
+                return False
+            
+            # Check if file has valid data
+            with open(cities_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if 'cities' in data and data['cities']:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking local cities data: {e}")
+            return False
     
     def display_welcome_screen(self) -> None:
         """Display welcome screen when no data is loaded"""

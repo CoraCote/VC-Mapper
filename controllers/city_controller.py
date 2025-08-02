@@ -305,80 +305,118 @@ class CityController:
             from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
             
             if action == "🌍 Fetch All Cities" and params.get("button"):
-                # Determine if we should fetch all cities (no limit)
-                fetch_all = params.get("fetch_all", False)
-                limit = None if fetch_all else params.get("limit", 50)
-                save_to_file = params.get("save_to_file", False)
+                fetch_source = params.get("fetch_source", "service")
                 
-                # Create multi-step progress tracker
-                steps = ["Fetching cities", "Processing data", "Saving to session"]
-                if params.get("fetch_traffic", False):
-                    steps.extend(["Fetching traffic data", "Processing traffic data", "Saving traffic data"])
-                if save_to_file:
-                    steps.append("Saving to JSON file")
-                
-                progress = create_multi_step_progress("Data Fetch Operation", steps)
-                
-                try:
-                    # Step 1: Fetch cities
-                    progress.step("Fetching cities")
-                    with DataLoadingIndicators.fetch_cities_loading():
-                        cities = self.fetch_all_cities(limit=limit, save_to_file=save_to_file)
+                if fetch_source == "local":
+                    # Load from local file
+                    progress = create_multi_step_progress("Local Data Loading", [
+                        "Loading from local file",
+                        "Processing data",
+                        "Saving to session"
+                    ])
                     
-                    if not cities.cities:
-                        progress.error("Failed to fetch cities. Please check the API connection.")
-                        return False
-                    
-                    # Step 2: Process data
-                    progress.step("Processing data")
-                    with DataLoadingIndicators.process_data_loading():
-                        # Process cities data
-                        pass
-                    
-                    # Step 3: Save to session
-                    progress.step("Saving to session")
-                    self.save_to_session(cities)
-                    
-                    # Fetch traffic data if requested
-                    if params.get("fetch_traffic", False):
-                        # Step 4: Fetch traffic data
-                        progress.step("Fetching traffic data")
-                        with DataLoadingIndicators.fetch_traffic_loading():
-                            traffic_data = self.fetch_traffic_data_with_pagination()
+                    try:
+                        # Step 1: Load from local file
+                        progress.step("Loading from local file")
+                        with DataLoadingIndicators.load_data_loading():
+                            cities = self.load_cities_from_json()
                         
-                        if traffic_data:
-                            # Step 5: Process traffic data
-                            progress.step("Processing traffic data")
-                            with DataLoadingIndicators.process_data_loading():
-                                # Process traffic data
-                                pass
-                            
-                            # Step 6: Save traffic data
-                            progress.step("Saving traffic data")
-                            with DataLoadingIndicators.save_data_loading():
-                                self.save_traffic_data_to_json(traffic_data)
-                                st.session_state.traffic_data = traffic_data
-                            
-                            record_count = len(traffic_data.get('features', []))
-                            progress.complete(f"Successfully fetched {len(cities)} cities and {record_count} traffic records!")
-                        else:
-                            progress.error("Cities fetched successfully, but traffic data failed to load.")
+                        if not cities or not cities.cities:
+                            progress.error("No local cities data found or data is empty.")
                             return False
-                    else:
-                        # Save to file if requested
-                        if save_to_file:
-                            progress.step("Saving to JSON file")
-                            with DataLoadingIndicators.save_data_loading():
-                                # File saving is handled in fetch_all_cities
-                                pass
                         
-                        progress.complete(f"Successfully fetched {len(cities)} cities!")
+                        # Step 2: Process data
+                        progress.step("Processing data")
+                        with DataLoadingIndicators.process_data_loading():
+                            # Process cities data
+                            pass
+                        
+                        # Step 3: Save to session
+                        progress.step("Saving to session")
+                        self.save_to_session(cities)
+                        
+                        progress.complete(f"Successfully loaded {len(cities)} cities from local file!")
+                        return True
+                        
+                    except Exception as e:
+                        progress.error(f"Error loading local data: {str(e)}")
+                        return False
+                
+                else:  # fetch_source == "service"
+                    # Fetch from service (existing logic)
+                    fetch_all = params.get("fetch_all", False)
+                    limit = None if fetch_all else params.get("limit", 50)
+                    save_to_file = params.get("save_to_file", False)
                     
-                    return True
+                    # Create multi-step progress tracker
+                    steps = ["Fetching cities", "Processing data", "Saving to session"]
+                    if params.get("fetch_traffic", False):
+                        steps.extend(["Fetching traffic data", "Processing traffic data", "Saving traffic data"])
+                    if save_to_file:
+                        steps.append("Saving to JSON file")
                     
-                except Exception as e:
-                    progress.error(f"Error during data fetch: {str(e)}")
-                    return False
+                    progress = create_multi_step_progress("Data Fetch Operation", steps)
+                    
+                    try:
+                        # Step 1: Fetch cities
+                        progress.step("Fetching cities")
+                        with DataLoadingIndicators.fetch_cities_loading():
+                            cities = self.fetch_all_cities(limit=limit, save_to_file=save_to_file)
+                        
+                        if not cities.cities:
+                            progress.error("Failed to fetch cities. Please check the API connection.")
+                            return False
+                        
+                        # Step 2: Process data
+                        progress.step("Processing data")
+                        with DataLoadingIndicators.process_data_loading():
+                            # Process cities data
+                            pass
+                        
+                        # Step 3: Save to session
+                        progress.step("Saving to session")
+                        self.save_to_session(cities)
+                        
+                        # Fetch traffic data if requested
+                        if params.get("fetch_traffic", False):
+                            # Step 4: Fetch traffic data
+                            progress.step("Fetching traffic data")
+                            with DataLoadingIndicators.fetch_traffic_loading():
+                                traffic_data = self.fetch_traffic_data_with_pagination()
+                            
+                            if traffic_data:
+                                # Step 5: Process traffic data
+                                progress.step("Processing traffic data")
+                                with DataLoadingIndicators.process_data_loading():
+                                    # Process traffic data
+                                    pass
+                                
+                                # Step 6: Save traffic data
+                                progress.step("Saving traffic data")
+                                with DataLoadingIndicators.save_data_loading():
+                                    self.save_traffic_data_to_json(traffic_data)
+                                    st.session_state.traffic_data = traffic_data
+                                
+                                record_count = len(traffic_data.get('features', []))
+                                progress.complete(f"Successfully fetched {len(cities)} cities and {record_count} traffic records!")
+                            else:
+                                progress.error("Cities fetched successfully, but traffic data failed to load.")
+                                return False
+                        else:
+                            # Save to file if requested
+                            if save_to_file:
+                                progress.step("Saving to JSON file")
+                                with DataLoadingIndicators.save_data_loading():
+                                    # File saving is handled in fetch_all_cities
+                                    pass
+                            
+                            progress.complete(f"Successfully fetched {len(cities)} cities!")
+                        
+                        return True
+                        
+                    except Exception as e:
+                        progress.error(f"Error during data fetch: {str(e)}")
+                        return False
             
             elif action == "🔍 Search Cities" and params.get("button") and params.get("query"):
                 with DataLoadingIndicators.search_cities_loading():
