@@ -137,6 +137,11 @@ class MapView:
                 st.markdown("#### 🎯 Actions")
                 self._render_action_buttons()
                 
+                # Map view settings below refresh button
+                st.markdown("---")
+                st.markdown("##### ⚙️ Map View Settings")
+                self._render_map_settings()
+                
                 st.markdown("---")
                 
                 # Statistical tables and important information
@@ -147,12 +152,6 @@ class MapView:
                 # Main map area
                 st.markdown("#### 🗺️ Google Map")
                 self._render_main_map_area(valid_cities)
-                
-                # Map view settings at bottom right
-                st.markdown("---")
-                with st.container():
-                    st.markdown("##### ⚙️ Map View Settings")
-                    self._render_map_settings()
                     
         except Exception as e:
             logger.error(f"Error rendering simplified UI layout: {e}")
@@ -424,6 +423,72 @@ class MapView:
             # Display the map
             st.pydeck_chart(deck, use_container_width=True, height=500)
             
+            # Traffic V/C Ratio Legend in row format below the map
+            st.markdown("---")
+            st.markdown("**🚦 Traffic V/C Ratio Legend:**")
+            
+            # Get traffic data for analytics
+            if traffic_data and 'features' in traffic_data:
+                from models.city_model import TrafficDataCollection
+                traffic_collection = TrafficDataCollection(traffic_data)
+                analytics = traffic_collection.get_vc_ratio_analytics()
+                
+                # Display legend in row format (4 columns)
+                legend_col1, legend_col2, legend_col3, legend_col4 = st.columns(4)
+                
+                categories = [
+                    ('low', legend_col1),
+                    ('moderate', legend_col2), 
+                    ('high', legend_col3),
+                    ('over_capacity', legend_col4)
+                ]
+                
+                for category, col in categories:
+                    with col:
+                        if category in analytics and analytics[category]['count'] > 0:
+                            data = analytics[category]
+                            st.markdown(f"{data['color']} **{data['name']}**")
+                            st.markdown(f"V/C: {data['min_vc_ratio']:.2f}-{data['max_vc_ratio']:.2f}")
+                            st.markdown(f"📊 {data['count']} segments")
+                            st.markdown(f"({data['percentage']:.1f}%)")
+                            st.markdown(f"🚗 Avg: {data['avg_aadt']:,.0f}")
+                            if data['top_counties']:
+                                st.markdown(f"📍 {', '.join(data['top_counties'][:2])}")
+                        else:
+                            # Show empty category
+                            if category == 'low':
+                                st.markdown("🟢 **Low Congestion**")
+                                st.markdown("V/C < 0.5")
+                                st.markdown("📊 No data")
+                            elif category == 'moderate':
+                                st.markdown("🟡 **Moderate**")
+                                st.markdown("0.5 ≤ V/C < 0.8")
+                                st.markdown("📊 No data")
+                            elif category == 'high':
+                                st.markdown("🟠 **High**")
+                                st.markdown("0.8 ≤ V/C < 1.0")
+                                st.markdown("📊 No data")
+                            elif category == 'over_capacity':
+                                st.markdown("🔴 **Over Capacity**")
+                                st.markdown("V/C ≥ 1.0")
+                                st.markdown("📊 No data")
+            else:
+                # Fallback legend without analytics in row format
+                legend_col1, legend_col2, legend_col3, legend_col4 = st.columns(4)
+                
+                with legend_col1:
+                    st.markdown("🟢 **Low**")
+                    st.markdown("V/C < 0.5")
+                with legend_col2:
+                    st.markdown("🟡 **Moderate**")
+                    st.markdown("0.5 ≤ V/C < 0.8")
+                with legend_col3:
+                    st.markdown("🟠 **High**")
+                    st.markdown("0.8 ≤ V/C < 1.0")
+                with legend_col4:
+                    st.markdown("🔴 **Over Capacity**")
+                    st.markdown("V/C ≥ 1.0")
+            
         except Exception as e:
             logger.error(f"Error rendering main map area: {e}")
             st.error("Error displaying map")
@@ -522,13 +587,6 @@ class MapView:
             with col2:
                 # Simple independent options
                 show_city_labels = st.checkbox("🏷️ City Labels", value=True, key="show_city_labels")
-                
-                # Traffic data legend (always shown since traffic data is always loaded)
-                st.markdown("**🚦 Traffic V/C Ratio Legend:**")
-                st.markdown("🟢 Green: V/C < 0.5 (Low congestion)")
-                st.markdown("🟡 Yellow: 0.5 ≤ V/C < 0.8 (Moderate)")
-                st.markdown("🟠 Orange: 0.8 ≤ V/C < 1.0 (High)")
-                st.markdown("🔴 Red: V/C ≥ 1.0 (Over capacity)")
                 
 
                 

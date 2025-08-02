@@ -336,6 +336,122 @@ class TrafficDataCollection:
             'unique_routes': len(set(td.route for td in self.traffic_data if td.route))
         }
     
+    def get_vc_ratio_analytics(self) -> Dict:
+        """
+        Calculate V/C ratio analytics for each congestion level
+        
+        Returns:
+            Dictionary with analytics for each V/C ratio category
+        """
+        if not self.traffic_data:
+            return {}
+        
+        # Define V/C ratio categories
+        categories = {
+            'low': {'min': 0, 'max': 0.5, 'color': '🟢', 'name': 'Low Congestion'},
+            'moderate': {'min': 0.5, 'max': 0.8, 'color': '🟡', 'name': 'Moderate Congestion'},
+            'high': {'min': 0.8, 'max': 1.0, 'color': '🟠', 'name': 'High Congestion'},
+            'over_capacity': {'min': 1.0, 'max': float('inf'), 'color': '🔴', 'name': 'Over Capacity'}
+        }
+        
+        analytics = {}
+        
+        for category, config in categories.items():
+            # Filter traffic data by V/C ratio
+            category_data = []
+            for td in self.traffic_data:
+                if td.aadt > 0:
+                    # Estimate capacity based on route type (simplified)
+                    estimated_capacity = self._estimate_capacity(td)
+                    vc_ratio = td.aadt / estimated_capacity if estimated_capacity > 0 else 0
+                    
+                    if config['min'] <= vc_ratio < config['max']:
+                        category_data.append({
+                            'traffic_data': td,
+                            'vc_ratio': vc_ratio,
+                            'estimated_capacity': estimated_capacity
+                        })
+            
+            # Calculate analytics for this category
+            if category_data:
+                vc_ratios = [item['vc_ratio'] for item in category_data]
+                aadt_values = [item['traffic_data'].aadt for item in category_data]
+                counties = list(set(item['traffic_data'].county for item in category_data if item['traffic_data'].county))
+                routes = list(set(item['traffic_data'].route for item in category_data if item['traffic_data'].route))
+                
+                analytics[category] = {
+                    'count': len(category_data),
+                    'percentage': (len(category_data) / len(self.traffic_data)) * 100,
+                    'avg_vc_ratio': sum(vc_ratios) / len(vc_ratios),
+                    'min_vc_ratio': min(vc_ratios),
+                    'max_vc_ratio': max(vc_ratios),
+                    'avg_aadt': sum(aadt_values) / len(aadt_values),
+                    'min_aadt': min(aadt_values),
+                    'max_aadt': max(aadt_values),
+                    'unique_counties': len(counties),
+                    'unique_routes': len(routes),
+                    'top_counties': sorted(counties, key=lambda x: len([item for item in category_data if item['traffic_data'].county == x]), reverse=True)[:3],
+                    'top_routes': sorted(routes, key=lambda x: len([item for item in category_data if item['traffic_data'].route == x]), reverse=True)[:3],
+                    'color': config['color'],
+                    'name': config['name']
+                }
+            else:
+                analytics[category] = {
+                    'count': 0,
+                    'percentage': 0,
+                    'avg_vc_ratio': 0,
+                    'min_vc_ratio': 0,
+                    'max_vc_ratio': 0,
+                    'avg_aadt': 0,
+                    'min_aadt': 0,
+                    'max_aadt': 0,
+                    'unique_counties': 0,
+                    'unique_routes': 0,
+                    'top_counties': [],
+                    'top_routes': [],
+                    'color': config['color'],
+                    'name': config['name']
+                }
+        
+        return analytics
+    
+    def _estimate_capacity(self, traffic_data: 'TrafficData') -> float:
+        """
+        Estimate roadway capacity based on route description
+        
+        Args:
+            traffic_data: TrafficData object
+            
+        Returns:
+            Estimated capacity (vehicles per day)
+        """
+        try:
+            desc_to = traffic_data.desc_to or ""
+            route = traffic_data.route or ""
+            
+            # Interstate highways
+            if any(keyword in desc_to.upper() for keyword in ['I-', 'INTERSTATE', 'I95', 'I75', 'I4']):
+                return 80000
+            
+            # US highways
+            elif any(keyword in desc_to.upper() for keyword in ['US-', 'US ', 'US1', 'US27', 'US41']):
+                return 40000
+            
+            # State roads
+            elif any(keyword in desc_to.upper() for keyword in ['SR-', 'SR ', 'STATE', 'SR811', 'SR80']):
+                return 30000
+            
+            # County roads
+            elif any(keyword in desc_to.upper() for keyword in ['CR-', 'CR ', 'COUNTY']):
+                return 15000
+            
+            # Local roads
+            else:
+                return 10000
+                
+        except Exception:
+            return 20000  # Default fallback
+    
     def to_dataframe(self) -> pd.DataFrame:
         """Convert collection to pandas DataFrame"""
         data = []

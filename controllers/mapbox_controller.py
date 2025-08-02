@@ -446,6 +446,7 @@ class MapboxController:
                     roadway_data.append({
                         'geometry': traffic_record.geometry,
                         'properties': {
+                            'name': f"Roadway {traffic_record.roadway}",  # Add explicit name for tooltip
                             'roadway': traffic_record.roadway,
                             'county': traffic_record.county,
                             'aadt': aadt,
@@ -474,7 +475,7 @@ class MapboxController:
                 data=roadway_geojson,
                 get_fill_color='properties.color',
                 get_line_color='properties.color',
-                get_line_width=3,
+                get_line_width=50,
                 filled=False,
                 stroked=True,
                 pickable=True,
@@ -483,7 +484,7 @@ class MapboxController:
                     "html": """
                     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                                 color: white; padding: 15px; border-radius: 10px; font-family: Arial;">
-                        <h3 style="margin: 0 0 10px 0;">Roadway {roadway}</h3>
+                        <h3 style="margin: 0 0 10px 0;">{name}</h3>
                         <p><strong>📍 County:</strong> {county}</p>
                         <p><strong>🛣️ Route:</strong> {route}</p>
                         <p><strong>📋 From:</strong> {desc_from}</p>

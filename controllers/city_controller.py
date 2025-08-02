@@ -336,7 +336,7 @@ class CityController:
                 else:
                     st.error("❌ Failed to fetch cities. Please check the API connection.")
                     return False
-
+            
             elif action == "🔍 Search Cities" and params.get("button") and params.get("query"):
                 with st.spinner("🔍 Searching cities..."):
                     cities = self.search_cities(params["query"])
