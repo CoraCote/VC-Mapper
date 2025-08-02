@@ -302,47 +302,91 @@ class CityController:
             True if successful, False otherwise
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
+            
             if action == "🌍 Fetch All Cities" and params.get("button"):
                 # Determine if we should fetch all cities (no limit)
                 fetch_all = params.get("fetch_all", False)
                 limit = None if fetch_all else params.get("limit", 50)
                 save_to_file = params.get("save_to_file", False)
                 
-                with st.spinner("🔄 Fetching cities data..."):
-                    cities = self.fetch_all_cities(limit=limit, save_to_file=save_to_file)
+                # Create multi-step progress tracker
+                steps = ["Fetching cities", "Processing data", "Saving to session"]
+                if params.get("fetch_traffic", False):
+                    steps.extend(["Fetching traffic data", "Processing traffic data", "Saving traffic data"])
+                if save_to_file:
+                    steps.append("Saving to JSON file")
+                
+                progress = create_multi_step_progress("Data Fetch Operation", steps)
+                
+                try:
+                    # Step 1: Fetch cities
+                    progress.step("Fetching cities")
+                    with DataLoadingIndicators.fetch_cities_loading():
+                        cities = self.fetch_all_cities(limit=limit, save_to_file=save_to_file)
                     
-                if cities.cities:
+                    if not cities.cities:
+                        progress.error("Failed to fetch cities. Please check the API connection.")
+                        return False
+                    
+                    # Step 2: Process data
+                    progress.step("Processing data")
+                    with DataLoadingIndicators.process_data_loading():
+                        # Process cities data
+                        pass
+                    
+                    # Step 3: Save to session
+                    progress.step("Saving to session")
                     self.save_to_session(cities)
                     
-                    # Fetch traffic data if requested (always unlimited)
+                    # Fetch traffic data if requested
                     if params.get("fetch_traffic", False):
-                        with st.spinner("🚦 Fetching ALL traffic data (unlimited mode)..."):
-                            # Use pagination method for complete data fetching
+                        # Step 4: Fetch traffic data
+                        progress.step("Fetching traffic data")
+                        with DataLoadingIndicators.fetch_traffic_loading():
                             traffic_data = self.fetch_traffic_data_with_pagination()
-                            if traffic_data:
+                        
+                        if traffic_data:
+                            # Step 5: Process traffic data
+                            progress.step("Processing traffic data")
+                            with DataLoadingIndicators.process_data_loading():
+                                # Process traffic data
+                                pass
+                            
+                            # Step 6: Save traffic data
+                            progress.step("Saving traffic data")
+                            with DataLoadingIndicators.save_data_loading():
                                 self.save_traffic_data_to_json(traffic_data)
                                 st.session_state.traffic_data = traffic_data
-                                record_count = len(traffic_data.get('features', []))
-                                st.success(f"✅ Successfully fetched {len(cities)} cities and {record_count} traffic records!")
-                            else:
-                                st.warning("⚠️ Cities fetched successfully, but traffic data failed to load.")
-                    else:
-                        if save_to_file:
-                            st.success(f"✅ Successfully fetched {len(cities)} cities and saved to JSON file!")
+                            
+                            record_count = len(traffic_data.get('features', []))
+                            progress.complete(f"Successfully fetched {len(cities)} cities and {record_count} traffic records!")
                         else:
-                            st.success(f"✅ Successfully fetched {len(cities)} cities!")
+                            progress.error("Cities fetched successfully, but traffic data failed to load.")
+                            return False
+                    else:
+                        # Save to file if requested
+                        if save_to_file:
+                            progress.step("Saving to JSON file")
+                            with DataLoadingIndicators.save_data_loading():
+                                # File saving is handled in fetch_all_cities
+                                pass
+                        
+                        progress.complete(f"Successfully fetched {len(cities)} cities!")
                     
                     return True
-                else:
-                    st.error("❌ Failed to fetch cities. Please check the API connection.")
+                    
+                except Exception as e:
+                    progress.error(f"Error during data fetch: {str(e)}")
                     return False
             
             elif action == "🔍 Search Cities" and params.get("button") and params.get("query"):
-                with st.spinner("🔍 Searching cities..."):
+                with DataLoadingIndicators.search_cities_loading():
                     cities = self.search_cities(params["query"])
                     
                 if cities.cities:
-                    self.save_to_session(cities)
+                    with DataLoadingIndicators.save_data_loading():
+                        self.save_to_session(cities)
                     st.success(f"✅ Found {len(cities)} cities matching '{params['query']}'!")
                     return True
                 else:
@@ -350,7 +394,9 @@ class CityController:
                     return False
 
             elif action == "📍 Get by GEOID" and params.get("button") and params.get("geoid"):
-                city = self.get_city_by_geoid(params["geoid"])
+                with DataLoadingIndicators.search_cities_loading():
+                    city = self.get_city_by_geoid(params["geoid"])
+                
                 if city:
                     # Auto-select the found city for automatic scaling
                     st.session_state.selected_city = city.to_dict()
@@ -643,61 +689,96 @@ class CityController:
             Dictionary containing complete traffic data
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
+            
             traffic_url = "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Annual_Average_Daily_Traffic_TDA/FeatureServer/0/query"
             
-            all_features = []
-            offset = 0
-            batch_size = 1000  # ArcGIS default limit
+            # Create progress tracker for pagination
+            progress = create_multi_step_progress("Traffic Data Fetch", [
+                "Initializing connection",
+                "Fetching data batches", 
+                "Processing records",
+                "Finalizing data"
+            ])
             
-            logger.info("Fetching traffic data with pagination...")
-            
-            while True:
-                params = {
-                    'outFields': '*',
-                    'where': '1=1',
-                    'f': 'geojson',
-                    'resultOffset': offset,
-                    'resultRecordCount': batch_size
-                }
+            try:
+                # Step 1: Initialize connection
+                progress.step("Initializing connection")
                 
-                response = self.session.get(traffic_url, params=params, timeout=60)
-                response.raise_for_status()
+                all_features = []
+                offset = 0
+                batch_size = 1000  # ArcGIS default limit
+                batch_count = 0
                 
-                traffic_data = response.json()
+                logger.info("Fetching traffic data with pagination...")
                 
-                if 'features' not in traffic_data or not traffic_data['features']:
-                    break
+                # Step 2: Fetch data batches
+                progress.step("Fetching data batches")
                 
-                features = traffic_data['features']
-                all_features.extend(features)
+                with DataLoadingIndicators.fetch_traffic_loading():
+                    while True:
+                        params = {
+                            'outFields': '*',
+                            'where': '1=1',
+                            'f': 'geojson',
+                            'resultOffset': offset,
+                            'resultRecordCount': batch_size
+                        }
+                        
+                        response = self.session.get(traffic_url, params=params, timeout=60)
+                        response.raise_for_status()
+                        
+                        traffic_data = response.json()
+                        
+                        if 'features' not in traffic_data or not traffic_data['features']:
+                            break
+                        
+                        features = traffic_data['features']
+                        all_features.extend(features)
+                        batch_count += 1
+                        
+                        logger.info(f"Fetched batch: {len(features)} records (total: {len(all_features)})")
+                        
+                        # Check if we've reached the limit
+                        if max_records and len(all_features) >= max_records:
+                            all_features = all_features[:max_records]
+                            break
+                        
+                        # Check if we got fewer records than requested (end of data)
+                        if len(features) < batch_size:
+                            break
+                        
+                        offset += batch_size
+                        
+                        # Safety check to prevent infinite loops
+                        if offset > 50000:  # Maximum reasonable offset
+                            logger.warning("Reached maximum offset limit, stopping pagination")
+                            break
                 
-                logger.info(f"Fetched batch: {len(features)} records (total: {len(all_features)})")
+                # Step 3: Process records
+                progress.step("Processing records")
+                with DataLoadingIndicators.process_data_loading():
+                    # Process the fetched data
+                    pass
                 
-                # Check if we've reached the limit
-                if max_records and len(all_features) >= max_records:
-                    all_features = all_features[:max_records]
-                    break
+                # Step 4: Finalize data
+                progress.step("Finalizing data")
                 
-                # Check if we got fewer records than requested (end of data)
-                if len(features) < batch_size:
-                    break
-                
-                offset += batch_size
-                
-                # Safety check to prevent infinite loops
-                if offset > 50000:  # Maximum reasonable offset
-                    logger.warning("Reached maximum offset limit, stopping pagination")
-                    break
-            
-            if all_features:
-                complete_data = {
-                    'type': 'FeatureCollection',
-                    'features': all_features
-                }
-                logger.info(f"Successfully fetched {len(all_features)} traffic records with pagination")
-                return complete_data
-            else:
-                logger.warning("No traffic records found")
+                if all_features:
+                    complete_data = {
+                        'type': 'FeatureCollection',
+                        'features': all_features
+                    }
+                    logger.info(f"Successfully fetched {len(all_features)} traffic records with pagination")
+                    progress.complete(f"Successfully fetched {len(all_features)} traffic records in {batch_count} batches!")
+                    return complete_data
+                else:
+                    logger.warning("No traffic records found")
+                    progress.error("No traffic records found")
+                    return {}
+                    
+            except Exception as e:
+                progress.error(f"Error during traffic data fetch: {str(e)}")
                 return {}
                 
         except Exception as e:

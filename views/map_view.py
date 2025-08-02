@@ -33,50 +33,78 @@ class MapView:
         Display a map showing only the Florida state boundary using Mapbox
         """
         try:
-            # Always load traffic data for map display
-            traffic_data = self._get_traffic_data_for_map()
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
             
-            # Create Florida map with real boundary data and traffic
-            deck = self.mapbox_controller.create_florida_map(traffic_data=traffic_data)
+            # Create multi-step progress for map loading
+            progress = create_multi_step_progress("Map Loading", [
+                "Loading traffic data",
+                "Creating map layers",
+                "Rendering map",
+                "Finalizing display"
+            ])
             
-            # Display the map
-            with st.container():
-                st.markdown('<div class="map-container">', unsafe_allow_html=True)
-                st.info("📍 Now showing Florida with **real boundary data** and **traffic roadway segments**! Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
+            try:
+                # Step 1: Load traffic data
+                progress.step("Loading traffic data")
+                with DataLoadingIndicators.load_data_loading():
+                    traffic_data = self._get_traffic_data_for_map()
                 
-                # Display map style selector
-                col1, col2 = st.columns([3, 1])
-                with col2:
-                    map_style = st.selectbox(
-                        "Map Style",
-                        options=[
-                            'mapbox://styles/mapbox/streets-v11',
-                            'mapbox://styles/mapbox/satellite-v9',
-                            'mapbox://styles/mapbox/light-v10',
-                            'mapbox://styles/mapbox/dark-v10'
-                        ],
-                        format_func=lambda x: {
-                            'mapbox://styles/mapbox/streets-v11': 'Streets',
-                            'mapbox://styles/mapbox/satellite-v9': 'Satellite',
-                            'mapbox://styles/mapbox/light-v10': 'Light',
-                            'mapbox://styles/mapbox/dark-v10': 'Dark'
-                        }[x],
-                        key="florida_map_style"
-                    )
+                # Step 2: Create map layers
+                progress.step("Creating map layers")
+                with DataLoadingIndicators.render_map_loading():
+                    deck = self.mapbox_controller.create_florida_map(traffic_data=traffic_data)
                 
-                # Update deck with selected style if changed
-                if hasattr(st.session_state, 'florida_map_style') and st.session_state.florida_map_style != deck.map_style:
-                    deck.map_style = map_style
+                # Step 3: Render map
+                progress.step("Rendering map")
                 
-                # Display the Mapbox map using PyDeck
-                st.pydeck_chart(deck, use_container_width=True, height=600)
+                # Display the map
+                with st.container():
+                    st.markdown('<div class="map-container">', unsafe_allow_html=True)
+                    st.info("📍 Now showing Florida with **real boundary data** and **traffic roadway segments**! Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
+                    
+                    # Display map style selector
+                    col1, col2 = st.columns([3, 1])
+                    with col2:
+                        map_style = st.selectbox(
+                            "Map Style",
+                            options=[
+                                'mapbox://styles/mapbox/streets-v11',
+                                'mapbox://styles/mapbox/satellite-v9',
+                                'mapbox://styles/mapbox/light-v10',
+                                'mapbox://styles/mapbox/dark-v10'
+                            ],
+                            format_func=lambda x: {
+                                'mapbox://styles/mapbox/streets-v11': 'Streets',
+                                'mapbox://styles/mapbox/satellite-v9': 'Satellite',
+                                'mapbox://styles/mapbox/light-v10': 'Light',
+                                'mapbox://styles/mapbox/dark-v10': 'Dark'
+                            }[x],
+                            key="florida_map_style"
+                        )
+                    
+                    # Update deck with selected style if changed
+                    if hasattr(st.session_state, 'florida_map_style') and st.session_state.florida_map_style != deck.map_style:
+                        deck.map_style = map_style
+                    
+                    # Display the Mapbox map using PyDeck
+                    st.pydeck_chart(deck, use_container_width=True, height=600)
+                    
+                    # Step 4: Finalize display
+                    progress.step("Finalizing display")
+                    
+                    # Show data source info
+                    if traffic_data:
+                        st.success("🌍 **Real-time Florida boundary data** and **🚦 traffic roadway segments** loaded!")
+                    else:
+                        st.success("🌍 **Real-time Florida boundary data** fetched from ArcGIS API")
+                    st.markdown('</div>', unsafe_allow_html=True)
                 
-                # Show data source info
-                if traffic_data:
-                    st.success("🌍 **Real-time Florida boundary data** and **🚦 traffic roadway segments** loaded!")
-                else:
-                    st.success("🌍 **Real-time Florida boundary data** fetched from ArcGIS API")
-                st.markdown('</div>', unsafe_allow_html=True)
+                # Complete the progress
+                progress.complete("Map loaded successfully!")
+                
+            except Exception as e:
+                progress.error(f"Error loading map: {str(e)}")
+                raise
                 
         except Exception as e:
             logger.error(f"Error displaying Florida only map: {e}")
@@ -91,24 +119,60 @@ class MapView:
             cities: Collection of cities to display
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
+            
             if not cities or len(cities) == 0:
                 st.error("🚫 No city data available to display on map")
                 return
             
-            # Filter cities with valid coordinates
-            valid_cities = CityCollection()
-            valid_cities.cities = cities.get_valid_cities()
+            # Create multi-step progress for cities map loading
+            progress = create_multi_step_progress("Cities Map Loading", [
+                "Validating city data",
+                "Filtering valid coordinates",
+                "Preparing map layers",
+                "Rendering cities map"
+            ])
             
-            if len(valid_cities) == 0:
-                st.error("🚫 No cities with valid coordinates found")
-                return
-            
-            # Initialize session state for selected city
-            if 'selected_city' not in st.session_state:
-                st.session_state.selected_city = None
-            
-            # Render the new simplified UI layout
-            self._render_simplified_ui_layout(valid_cities)
+            try:
+                # Step 1: Validate city data
+                progress.step("Validating city data")
+                with DataLoadingIndicators.process_data_loading():
+                    # Validate cities data
+                    pass
+                
+                # Step 2: Filter cities with valid coordinates
+                progress.step("Filtering valid coordinates")
+                with DataLoadingIndicators.process_data_loading():
+                    valid_cities = CityCollection()
+                    valid_cities.cities = cities.get_valid_cities()
+                
+                if len(valid_cities) == 0:
+                    progress.error("No cities with valid coordinates found")
+                    st.error("🚫 No cities with valid coordinates found")
+                    return
+                
+                # Step 3: Prepare map layers
+                progress.step("Preparing map layers")
+                with DataLoadingIndicators.render_map_loading():
+                    # Prepare map layers
+                    pass
+                
+                # Step 4: Render cities map
+                progress.step("Rendering cities map")
+                
+                # Initialize session state for selected city
+                if 'selected_city' not in st.session_state:
+                    st.session_state.selected_city = None
+                
+                # Render the new simplified UI layout
+                self._render_simplified_ui_layout(valid_cities)
+                
+                # Complete the progress
+                progress.complete("Cities map loaded successfully!")
+                
+            except Exception as e:
+                progress.error(f"Error loading cities map: {str(e)}")
+                raise
             
         except Exception as e:
             logger.error(f"Error displaying cities on map: {e}")
@@ -389,39 +453,71 @@ class MapView:
             valid_cities: Collection of cities to display on map
         """
         try:
-            # Get current settings
-            selected_city = None
-            if st.session_state.get('selected_city'):
-                # Find the city object from session state
-                city_data = st.session_state.selected_city
-                for city in valid_cities.cities:
-                    if city.geoid == city_data.get('geoid'):
-                        selected_city = city
-                        break
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
             
-            # Get map style from settings
-            map_style = st.session_state.get('map_style_selector', 'mapbox://styles/mapbox/streets-v11')
+            # Create multi-step progress for main map area
+            progress = create_multi_step_progress("Main Map Rendering", [
+                "Loading city data",
+                "Loading traffic data",
+                "Creating map layers",
+                "Rendering map display"
+            ])
             
-            # Show auto-scaling indicator if a city was auto-selected from search
-            if selected_city and st.session_state.get('auto_scaled_city', False):
-                st.info(f"🎯 **Auto-zoomed to {selected_city.name}** - Map scaled to city area for better visibility!")
-                # Clear the auto-scale flag after displaying the indicator
-                st.session_state.auto_scaled_city = False
+            try:
+                # Step 1: Load city data
+                progress.step("Loading city data")
+                with DataLoadingIndicators.process_data_loading():
+                    # Get current settings
+                    selected_city = None
+                    if st.session_state.get('selected_city'):
+                        # Find the city object from session state
+                        city_data = st.session_state.selected_city
+                        for city in valid_cities.cities:
+                            if city.geoid == city_data.get('geoid'):
+                                selected_city = city
+                                break
+                    
+                    # Get map style from settings
+                    map_style = st.session_state.get('map_style_selector', 'mapbox://styles/mapbox/streets-v11')
+                    
+                    # Show auto-scaling indicator if a city was auto-selected from search
+                    if selected_city and st.session_state.get('auto_scaled_city', False):
+                        st.info(f"🎯 **Auto-zoomed to {selected_city.name}** - Map scaled to city area for better visibility!")
+                        # Clear the auto-scale flag after displaying the indicator
+                        st.session_state.auto_scaled_city = False
+                
+                # Step 2: Load traffic data
+                progress.step("Loading traffic data")
+                with DataLoadingIndicators.load_data_loading():
+                    traffic_data = self._get_traffic_data_for_map()
+                
+                # Step 3: Create map layers
+                progress.step("Creating map layers")
+                with DataLoadingIndicators.render_map_loading():
+                    deck = self.mapbox_controller.create_florida_map(
+                        cities=valid_cities,
+                        selected_city=selected_city,
+                        show_only_selected=(selected_city is not None),
+                        traffic_data=traffic_data,
+                        map_style=map_style
+                    )
+                
+                # Step 4: Render map display
+                progress.step("Rendering map display")
+                
+                # Display the map
+                st.pydeck_chart(deck, use_container_width=True, height=500)
+                
+                # Complete the progress
+                progress.complete("Main map area rendered successfully!")
+                
+            except Exception as e:
+                progress.error(f"Error rendering main map area: {str(e)}")
+                raise
             
-            # Always load traffic data for map display
-            traffic_data = self._get_traffic_data_for_map()
-            
-            # Create map with simplified settings
-            deck = self.mapbox_controller.create_florida_map(
-                cities=valid_cities,
-                selected_city=selected_city,
-                show_only_selected=(selected_city is not None),
-                traffic_data=traffic_data,
-                map_style=map_style
-            )
-            
-            # Display the map
-            st.pydeck_chart(deck, use_container_width=True, height=500)
+        except Exception as e:
+            logger.error(f"Error rendering main map area: {e}")
+            st.error("❌ Error rendering map area")
             
             # Traffic V/C Ratio Legend in row format below the map
             st.markdown("---")
@@ -501,27 +597,55 @@ class MapView:
             Traffic data dictionary or None if not available
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators, create_multi_step_progress
+            
             # First check if traffic data is already in session state
             if st.session_state.get('traffic_data'):
                 return st.session_state.traffic_data
             
-            # If not in session state, try to load from saved JSON files
-            traffic_data = self._load_traffic_data_from_files()
-            if traffic_data:
-                # Save to session state for future use
-                st.session_state.traffic_data = traffic_data
-                return traffic_data
+            # Create progress tracker for traffic data loading
+            progress = create_multi_step_progress("Traffic Data Loading", [
+                "Checking session state",
+                "Loading from files",
+                "Fetching fresh data",
+                "Saving to session"
+            ])
             
-            # If no saved data, fetch fresh traffic data
-            with st.spinner("🚦 Loading traffic data..."):
-                traffic_data = self.city_controller.fetch_traffic_data()
-                if traffic_data:
-                    # Save to session state and file
-                    st.session_state.traffic_data = traffic_data
-                    self.city_controller.save_traffic_data_to_json(traffic_data)
-                    return traffic_data
-            
-            return None
+            try:
+                # Step 1: Check session state
+                progress.step("Checking session state")
+                # Already checked above
+                
+                # Step 2: Load from saved files
+                progress.step("Loading from files")
+                with DataLoadingIndicators.load_data_loading():
+                    traffic_data = self._load_traffic_data_from_files()
+                    if traffic_data:
+                        # Step 4: Save to session
+                        progress.step("Saving to session")
+                        st.session_state.traffic_data = traffic_data
+                        progress.complete("Traffic data loaded from files successfully!")
+                        return traffic_data
+                
+                # Step 3: Fetch fresh data if no saved data
+                progress.step("Fetching fresh data")
+                with DataLoadingIndicators.fetch_traffic_loading():
+                    traffic_data = self.city_controller.fetch_traffic_data()
+                    if traffic_data:
+                        # Step 4: Save to session and file
+                        progress.step("Saving to session")
+                        with DataLoadingIndicators.save_data_loading():
+                            st.session_state.traffic_data = traffic_data
+                            self.city_controller.save_traffic_data_to_json(traffic_data)
+                        progress.complete("Traffic data fetched and saved successfully!")
+                        return traffic_data
+                
+                progress.error("No traffic data available")
+                return None
+                
+            except Exception as e:
+                progress.error(f"Error loading traffic data: {str(e)}")
+                return None
             
         except Exception as e:
             logger.error(f"Error loading traffic data for map: {e}")
@@ -535,6 +659,7 @@ class MapView:
             Traffic data dictionary or None if no file found
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators
             import os
             import json
             
@@ -545,12 +670,13 @@ class MapView:
             if not os.path.exists(traffic_file):
                 return None
             
-            # Load traffic data from fixed filename
-            with open(traffic_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if 'traffic_data' in data:
-                    logger.info(f"Loaded traffic data from {traffic_file}")
-                    return data['traffic_data']
+            # Load traffic data from fixed filename with loading indicator
+            with DataLoadingIndicators.load_data_loading():
+                with open(traffic_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if 'traffic_data' in data:
+                        logger.info(f"Loaded traffic data from {traffic_file}")
+                        return data['traffic_data']
             
             return None
             

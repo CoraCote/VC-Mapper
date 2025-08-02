@@ -524,6 +524,8 @@ class CityView:
             data_key: Key for unique file naming
         """
         try:
+            from utils.loading_utils import DataLoadingIndicators
+            
             if df.empty:
                 return
             
@@ -534,7 +536,8 @@ class CityView:
             
             with col1:
                 # CSV Export
-                csv_data = df.to_csv(index=False)
+                with DataLoadingIndicators.export_data_loading():
+                    csv_data = df.to_csv(index=False)
                 st.download_button(
                     label="📄 Download CSV",
                     data=csv_data,
@@ -553,10 +556,11 @@ class CityView:
                     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
                     from openpyxl.utils import get_column_letter
                     
-                    # Create Excel workbook
-                    wb = Workbook()
-                    ws = wb.active
-                    ws.title = f"{data_type}"
+                    with DataLoadingIndicators.export_data_loading():
+                        # Create Excel workbook
+                        wb = Workbook()
+                        ws = wb.active
+                        ws.title = f"{data_type}"
                     
                     # Define styles
                     header_font = Font(bold=True, color="FFFFFF")
@@ -641,7 +645,8 @@ class CityView:
             
             with col3:
                 # JSON Export
-                json_data = df.to_json(orient='records', indent=2)
+                with DataLoadingIndicators.export_data_loading():
+                    json_data = df.to_json(orient='records', indent=2)
                 st.download_button(
                     label="📋 Download JSON",
                     data=json_data,
