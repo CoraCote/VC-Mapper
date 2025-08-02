@@ -52,19 +52,13 @@ class CityView:
                         help="Save the fetched cities data to a local JSON file"
                     )
                     
-                    fetch_traffic = st.checkbox(
-                        "Fetch traffic data",
-                        value=False,
-                        help="Also fetch traffic data from the AADT API"
-                    )
-                    
                     fetch_button = st.button("🚀 FETCH ALL CITIES", type="primary", use_container_width=True)
                     params = {
                         "limit": None,  # Always no limit
                         "button": fetch_button, 
                         "fetch_all": True,  # Always fetch all
                         "save_to_file": save_to_file,
-                        "fetch_traffic": fetch_traffic
+                        "fetch_traffic": True
                     }
 
                 elif action == "🔍 Search Cities":
