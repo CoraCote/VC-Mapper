@@ -1,13 +1,13 @@
 # FDOT City Data Explorer
 
-A simple Streamlit application for exploring city boundary data from the Florida Department of Transportation (FDOT) GIS API.
+A streamlined Streamlit application for exploring city boundary data from the Florida Department of Transportation (FDOT) GIS API with interactive mapping.
 
 ## Features
 
 - **City Data Fetching**: Retrieve comprehensive city data from FDOT GIS API
-- **City Search**: Search for cities by name with fuzzy matching
 - **GEOID Lookup**: Get specific city data by Geographic Identifier (GEOID)
-- **Data Visualization**: Display city data in formatted tables with summary statistics
+- **Interactive Maps**: Visualize cities on Mapbox-powered maps with multiple styles
+- **Data Analytics**: View population and area statistics with interactive charts
 - **Error Handling**: Robust error handling for API failures and data validation
 
 ## Data Source
@@ -43,20 +43,16 @@ streamlit run app.py
 ## Usage
 
 ### Fetch All Cities
-- Use the sidebar to select "Fetch All Cities"
-- Set a limit on the number of cities to retrieve (1-1000)
-- Click "Fetch Cities" to retrieve data from the FDOT GIS API
-
-### Search Cities
-- Select "Search Cities" from the sidebar
-- Enter a city name to search for
-- Set a limit on search results (1-50)
-- Click "Search" to find matching cities
+- Use the sidebar to select "🌍 Fetch All Cities"
+- Set a limit on the number of cities to retrieve (5-500)
+- Click "🚀 FETCH CITY" to retrieve data from the FDOT GIS API
+- View cities on the interactive map with various style options
 
 ### Get City by GEOID
-- Choose "Get City by GEOID" from the sidebar
+- Choose "📍 Get by GEOID" from the sidebar
 - Enter a specific GEOID (e.g., 1264400 for Satellite Beach)
-- Click "Get City" to retrieve the specific city data
+- Click "📍 Get City" to retrieve the specific city data
+- Explore the data in detailed table and chart views
 
 ## API Implementation
 
@@ -120,18 +116,29 @@ The application includes comprehensive error handling for:
 - `streamlit`: Web application framework
 - `requests`: HTTP client for API calls
 - `pandas`: Data manipulation and display
-- `logging`: Application logging
+- `plotly`: Interactive charts and visualizations
+- `mapbox`: Map styling and visualization
+- `pydeck`: 3D mapping and deck.gl integration
 
 ## Project Structure
 
 ```
 VC-Mapper/
-├── app.py                 # Main Streamlit application
-├── fdot_api.py           # FDOT GIS API integration
-├── test_fdot_api.py      # API testing
-├── requirements.txt      # Python dependencies
-├── README.md            # Documentation
-└── venv/                # Virtual environment
+├── app.py                     # Main Streamlit application
+├── models/                    # Data models
+│   └── city_model.py         # City data structures
+├── controllers/               # Business logic
+│   ├── city_controller.py    # City data operations
+│   └── mapbox_controller.py  # Map visualization
+├── views/                     # UI components
+│   ├── city_view.py          # City data display
+│   └── map_view.py           # Map visualization
+├── utils/                     # Utilities
+│   ├── css_styles.py         # Custom styling
+│   ├── constants.py          # Configuration
+│   └── florida_boundary_service.py  # Florida boundary data
+├── requirements.txt           # Python dependencies
+└── README.md                 # Documentation
 ```
 
 ## Contributing

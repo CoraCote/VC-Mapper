@@ -232,3 +232,119 @@ class CityCollection:
     def __getitem__(self, index):
         """Make collection indexable"""
         return self.cities[index]
+
+
+class TrafficData:
+    """
+    Traffic data model for Annual Average Daily Traffic (AADT) data
+    """
+    
+    def __init__(self, feature_data: Dict):
+        """
+        Initialize a TrafficData object with GeoJSON feature data
+        
+        Args:
+            feature_data: Dictionary containing traffic feature data from API
+        """
+        self.properties = feature_data.get('properties', {})
+        self.geometry = feature_data.get('geometry', {})
+        
+        # Extract common traffic properties
+        self.objectid = self.properties.get('OBJECTID')
+        self.roadway = self.properties.get('ROADWAY', '')
+        self.county = self.properties.get('COUNTY', '')
+        self.year = self.properties.get('YEAR')
+        self.aadt = self.properties.get('AADT', 0)  # Annual Average Daily Traffic
+        self.peak_hour = self.properties.get('PEAK_HOUR', '')
+        self.district = self.properties.get('DISTRICT', '')
+        self.route = self.properties.get('ROUTE', '')
+        
+    def to_dict(self) -> Dict:
+        """Convert traffic data object back to dictionary"""
+        return {
+            'objectid': self.objectid,
+            'roadway': self.roadway,
+            'county': self.county,
+            'year': self.year,
+            'aadt': self.aadt,
+            'peak_hour': self.peak_hour,
+            'district': self.district,
+            'route': self.route,
+            'geometry': self.geometry,
+            'properties': self.properties
+        }
+
+
+class TrafficDataCollection:
+    """
+    Collection of traffic data with utility methods
+    """
+    
+    def __init__(self, traffic_geojson: Dict = None):
+        """
+        Initialize collection with traffic GeoJSON data
+        
+        Args:
+            traffic_geojson: GeoJSON dictionary containing traffic features
+        """
+        self.traffic_data = []
+        if traffic_geojson and 'features' in traffic_geojson:
+            self.traffic_data = [TrafficData(feature) for feature in traffic_geojson['features']]
+    
+    def get_traffic_by_county(self, county: str) -> List[TrafficData]:
+        """Get traffic data filtered by county"""
+        return [td for td in self.traffic_data if td.county.upper() == county.upper()]
+    
+    def get_traffic_by_route(self, route: str) -> List[TrafficData]:
+        """Get traffic data filtered by route"""
+        return [td for td in self.traffic_data if route.upper() in td.route.upper()]
+    
+    def get_high_traffic_roads(self, min_aadt: int = 10000) -> List[TrafficData]:
+        """Get roads with high traffic volume"""
+        return [td for td in self.traffic_data if td.aadt >= min_aadt]
+    
+    def get_traffic_summary_stats(self) -> Dict:
+        """Get summary statistics for traffic data"""
+        if not self.traffic_data:
+            return {}
+        
+        aadt_values = [td.aadt for td in self.traffic_data if td.aadt > 0]
+        
+        return {
+            'total_records': len(self.traffic_data),
+            'records_with_aadt': len(aadt_values),
+            'avg_aadt': sum(aadt_values) / len(aadt_values) if aadt_values else 0,
+            'max_aadt': max(aadt_values) if aadt_values else 0,
+            'min_aadt': min(aadt_values) if aadt_values else 0,
+            'unique_counties': len(set(td.county for td in self.traffic_data if td.county)),
+            'unique_routes': len(set(td.route for td in self.traffic_data if td.route))
+        }
+    
+    def to_dataframe(self) -> pd.DataFrame:
+        """Convert collection to pandas DataFrame"""
+        data = []
+        for td in self.traffic_data:
+            data.append({
+                'Object ID': td.objectid,
+                'Roadway': td.roadway,
+                'County': td.county,
+                'Year': td.year,
+                'AADT': td.aadt,
+                'Peak Hour': td.peak_hour,
+                'District': td.district,
+                'Route': td.route
+            })
+        
+        return pd.DataFrame(data)
+    
+    def __len__(self) -> int:
+        """Return number of traffic records in collection"""
+        return len(self.traffic_data)
+    
+    def __iter__(self):
+        """Make collection iterable"""
+        return iter(self.traffic_data)
+    
+    def __getitem__(self, index):
+        """Make collection indexable"""
+        return self.traffic_data[index]

@@ -7,8 +7,6 @@ import logging
 import pydeck as pdk
 import pandas as pd
 from models.city_model import City, CityCollection
-from models.street_model import Street, StreetCollection
-from models.traffic_model import TrafficData, TrafficCollection
 from utils.florida_boundary_service import florida_boundary_service
 
 logger = logging.getLogger(__name__)
@@ -289,125 +287,18 @@ class MapboxController:
             logger.error(f"Error getting city marker style: {e}")
             return [128, 128, 128, 200], 10  # Gray fallback
     
-    def get_streets_layer(self, streets: StreetCollection, 
-                         show_traffic: bool = True, 
-                         city_selected: bool = False) -> Optional[pdk.Layer]:
-        """
-        Create a layer for street data
-        
-        Args:
-            streets: Collection of streets to display
-            show_traffic: Whether to show traffic-based coloring
-            city_selected: Whether this is for a selected city
-            
-        Returns:
-            PyDeck PathLayer for streets
-        """
-        try:
-            valid_streets = streets.get_valid_streets()
-            
-            if not valid_streets:
-                logger.warning("No valid streets to display")
-                return None
-            
-            # Prepare street data
-            street_data = []
-            for street in valid_streets:
-                coords = street.get_coordinates()
-                if not coords:
-                    continue
-                
-                # Get color based on traffic or selection
-                if city_selected:
-                    color = [0, 116, 217, 200]  # Blue for selected city
-                    width = 3
-                elif show_traffic:
-                    color = self._get_traffic_color_rgba(street.traffic_level)
-                    width = 4
-                else:
-                    color = [0, 116, 217, 150]  # Default blue
-                    width = 2
-                
-                # Convert coordinates to the format expected by PathLayer
-                path_coords = []
-                if isinstance(coords[0][0], list):  # MultiLineString
-                    for line in coords:
-                        path_coords.extend([[coord[1], coord[0]] for coord in line])
-                else:  # LineString
-                    path_coords = [[coord[1], coord[0]] for coord in coords]  # Swap to [lat, lon]
-                
-                street_data.append({
-                    'path': path_coords,
-                    'name': street.street_name,
-                    'traffic_level': street.get_traffic_level_display(),
-                    'color': color,
-                    'width': width
-                })
-            
-            # Convert to DataFrame
-            df = pd.DataFrame(street_data)
-            
-            # Create path layer
-            layer = pdk.Layer(
-                "PathLayer",
-                data=df,
-                get_path='path',
-                get_color='color',
-                get_width='width',
-                width_scale=1,
-                width_min_pixels=1,
-                pickable=True,
-                auto_highlight=True
-            )
-            
-            logger.info(f"Created streets layer with {len(valid_streets)} streets")
-            return layer
-            
-        except Exception as e:
-            logger.error(f"Error creating streets layer: {e}")
-            return None
-    
-    def _get_traffic_color_rgba(self, traffic_level: str) -> List[int]:
-        """
-        Get RGBA color for traffic level
-        
-        Args:
-            traffic_level: Traffic level string
-            
-        Returns:
-            RGBA color as list [r, g, b, a]
-        """
-        traffic_colors = {
-            'very_high': [255, 0, 0, 200],    # Red
-            'high': [255, 102, 0, 200],       # Orange
-            'medium': [255, 255, 0, 200],     # Yellow
-            'low': [102, 255, 0, 200],        # Light Green
-            'very_low': [0, 255, 0, 200],     # Green
-            'unknown': [128, 128, 128, 200]   # Gray
-        }
-        
-        return traffic_colors.get(traffic_level, [128, 128, 128, 200])
+
     
     def create_florida_map(self, cities: Optional[CityCollection] = None,
                           selected_city: Optional[City] = None,
-                          streets: Optional[StreetCollection] = None,
-                          traffic_data: Optional[TrafficCollection] = None,
-                          show_traffic: bool = True,
-                          show_traffic_heatmap: bool = False,
-                          traffic_filter_level: Optional[str] = None,
                           show_only_selected: bool = False,
                           map_style: str = 'mapbox://styles/mapbox/streets-v11') -> pdk.Deck:
         """
-        Create a complete Florida map with all layers
+        Create a complete Florida map with city layers
         
         Args:
             cities: Collection of cities to display
             selected_city: Currently selected city
-            streets: Collection of streets to display
-            traffic_data: Collection of real-time traffic data to display
-            show_traffic: Whether to show traffic coloring
-            show_traffic_heatmap: Whether to show traffic volume heatmap
-            traffic_filter_level: Optional traffic level filter
             show_only_selected: Whether to show only selected city
             map_style: Mapbox map style
             
@@ -436,32 +327,6 @@ class MapboxController:
                 city_layer = self.get_city_markers_layer(cities, selected_city)
                 if city_layer:
                     layers.append(city_layer)
-            
-            # Add streets if provided
-            if streets:
-                streets_layer = self.get_streets_layer(
-                    streets, show_traffic, selected_city is not None
-                )
-                if streets_layer:
-                    layers.append(streets_layer)
-            
-            # Add traffic data layers if provided
-            if traffic_data and show_traffic:
-                # Add traffic volume heatmap first (background layer)
-                if show_traffic_heatmap:
-                    heatmap_layer = self.get_traffic_volume_heatmap_layer(traffic_data)
-                    if heatmap_layer:
-                        layers.append(heatmap_layer)
-                
-                # Add traffic path layer
-                traffic_layer = self.get_traffic_layer(
-                    traffic_data, 
-                    show_volume=True, 
-                    show_speed=True,
-                    filter_level=traffic_filter_level
-                )
-                if traffic_layer:
-                    layers.append(traffic_layer)
             
             # Update deck with layers
             deck.layers = layers
@@ -495,7 +360,14 @@ class MapboxController:
             
             # If we have a selected city, center on it but with wider view
             if selected_city and selected_city.has_valid_coordinates():
-                return selected_city.latitude, selected_city.longitude, 10
+                # Check if this is an auto-scaled city from search
+                import streamlit as st
+                if st.session_state.get('auto_scaled_city', False):
+                    # Use higher zoom for auto-scaled cities to really focus on the city area
+                    return selected_city.latitude, selected_city.longitude, 13
+                else:
+                    # Regular zoom for manually selected cities
+                    return selected_city.latitude, selected_city.longitude, 10
             
             # Otherwise, center on all valid cities
             if cities:
@@ -511,168 +383,5 @@ class MapboxController:
             logger.error(f"Error calculating map view: {e}")
             return self.florida_center['lat'], self.florida_center['lon'], 7
     
-    def get_traffic_layer(self, traffic_collection: TrafficCollection,
-                         show_volume: bool = True,
-                         show_speed: bool = True,
-                         filter_level: Optional[str] = None) -> Optional[pdk.Layer]:
-        """
-        Create a layer for real-time traffic data visualization
-        
-        Args:
-            traffic_collection: Collection of traffic data to display
-            show_volume: Whether to show volume-based visualization
-            show_speed: Whether to show speed-based visualization
-            filter_level: Optional traffic level filter (Low, Moderate, High, Heavy)
-            
-        Returns:
-            PyDeck PathLayer for traffic data
-        """
-        try:
-            if not traffic_collection or len(traffic_collection) == 0:
-                logger.warning("No traffic data to display")
-                return None
-            
-            # Filter traffic data if level filter is specified
-            traffic_data = traffic_collection.traffic_data
-            if filter_level and filter_level != 'All':
-                traffic_data = [data for data in traffic_data 
-                              if data.get_traffic_level() == filter_level]
-            
-            if not traffic_data:
-                logger.warning(f"No traffic data matching filter: {filter_level}")
-                return None
-            
-            # Prepare traffic visualization data
-            traffic_viz_data = []
-            for traffic in traffic_data:
-                if not traffic.coordinates or len(traffic.coordinates) < 2:
-                    continue
-                
-                # Convert coordinates to [lat, lon] format for PyDeck
-                path_coords = [[coord[1], coord[0]] for coord in traffic.coordinates]
-                
-                # Get visualization properties based on V/C ratio for better traffic analysis
-                color = traffic.get_color_by_vc_ratio()
-                width = traffic.get_line_width_by_vc_ratio() if show_volume else 3
-                vc_ratio = traffic.calculate_vc_ratio()
-                vc_level = traffic.get_vc_ratio_level()
-                
-                # Create data point for visualization with enhanced AADT and V/C ratio information
-                traffic_viz_data.append({
-                    'path': path_coords,
-                    'roadway_name': traffic.roadway_name,
-                    'traffic_volume': traffic.aadt,  # Use AADT value
-                    'aadt': traffic.aadt,
-                    'vc_ratio': vc_ratio,
-                    'vc_level': vc_level,
-                    'average_speed': traffic.average_speed,
-                    'speed_limit': traffic.speed_limit,
-                    'speed_ratio': traffic.speed_ratio,
-                    'traffic_level': traffic.get_traffic_level(),
-                    'direction': traffic.direction,
-                    'county': traffic.county,
-                    'color': color,
-                    'width': width,
-                    'volume_category': traffic.volume_category,
-                    'data_timestamp': str(traffic.year),  # Show year instead of timestamp
-                    'data_quality': traffic.data_quality,
-                    'confidence_level': traffic.confidence_level,
-                    'year': traffic.year,
-                    'district': traffic.district,
-                    'desc_from': traffic.desc_from,
-                    'desc_to': traffic.desc_to
-                })
-            
-            if not traffic_viz_data:
-                logger.warning("No valid traffic paths to display")
-                return None
-            
-            # Convert to DataFrame
-            df = pd.DataFrame(traffic_viz_data)
-            
-            # Create enhanced tooltip for AADT data with V/C ratio information
-            tooltip_html = """
-            <b>🛣️ {roadway_name}</b><br/>
-            <b>📊 Level of Service:</b> {vc_level}<br/>
-            <b>⚖️ V/C Ratio:</b> {vc_ratio:.2f}<br/>
-            <b>🚗 AADT:</b> {traffic_volume:,} vehicles/day<br/>
-            <b>📈 Volume Category:</b> {volume_category}<br/>
-            <b>📍 County:</b> {county}<br/>
-            <b>📅 Year:</b> {data_timestamp}<br/>
-            <b>ℹ️ Data Quality:</b> {data_quality}
-            """
-            
-            # Create path layer with enhanced styling
-            layer = pdk.Layer(
-                "PathLayer",
-                data=df,
-                get_path='path',
-                get_color='color',
-                get_width='width',
-                width_scale=1,
-                width_min_pixels=2,
-                width_max_pixels=12,
-                pickable=True,
-                auto_highlight=True,
-                highlight_color=[255, 255, 255, 80]
-            )
-            
-            logger.info(f"Created traffic layer with {len(traffic_viz_data)} traffic segments")
-            return layer
-            
-        except Exception as e:
-            logger.error(f"Error creating traffic layer: {e}")
-            return None
-    
-    def get_traffic_volume_heatmap_layer(self, traffic_collection: TrafficCollection) -> Optional[pdk.Layer]:
-        """
-        Create a heatmap layer for traffic volume visualization
-        
-        Args:
-            traffic_collection: Collection of traffic data
-            
-        Returns:
-            PyDeck HeatmapLayer for traffic volume
-        """
-        try:
-            if not traffic_collection or len(traffic_collection) == 0:
-                logger.warning("No traffic data for heatmap")
-                return None
-            
-            # Prepare heatmap data using midpoints of traffic segments
-            heatmap_data = []
-            for traffic in traffic_collection.traffic_data:
-                midpoint = traffic.get_midpoint()
-                if midpoint and traffic.traffic_volume > 0:
-                    heatmap_data.append({
-                        'position': [midpoint[1], midpoint[0]],  # [lat, lon]
-                        'weight': traffic.traffic_volume / 1000,  # Scale down for better visualization
-                        'roadway_name': traffic.roadway_name,
-                        'traffic_volume': traffic.traffic_volume
-                    })
-            
-            if not heatmap_data:
-                logger.warning("No valid traffic volume data for heatmap")
-                return None
-            
-            # Convert to DataFrame
-            df = pd.DataFrame(heatmap_data)
-            
-            # Create heatmap layer
-            layer = pdk.Layer(
-                "HeatmapLayer",
-                data=df,
-                get_position='position',
-                get_weight='weight',
-                radius_pixels=100,
-                intensity=1,
-                threshold=0.05,
-                pickable=False
-            )
-            
-            logger.info(f"Created traffic volume heatmap with {len(heatmap_data)} points")
-            return layer
-            
-        except Exception as e:
-            logger.error(f"Error creating traffic heatmap layer: {e}")
-            return None
+
+

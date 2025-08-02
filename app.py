@@ -8,8 +8,8 @@ import logging
 
 # Import MVC components
 from models import CityCollection
-from controllers import CityController, StreetController
-from views import MapView, CityView, StreetView
+from controllers import CityController
+from views import MapView, CityView
 from utils import load_css, create_header, create_footer
 from utils.constants import UI_CONFIG
 
@@ -26,12 +26,8 @@ class FDOTCityExplorer:
     def __init__(self):
         """Initialize the application with MVC components"""
         self.city_controller = CityController()
-        self.street_controller = StreetController()
-
-        
         self.map_view = MapView()
         self.city_view = CityView()
-        self.street_view = StreetView()
         
         self._initialize_session_state()
     
@@ -41,8 +37,6 @@ class FDOTCityExplorer:
             st.session_state.cities_data = None
         if 'selected_city' not in st.session_state:
             st.session_state.selected_city = None
-        if 'current_streets' not in st.session_state:
-            st.session_state.current_streets = None
     
     def configure_page(self):
         """Configure Streamlit page settings"""
@@ -112,7 +106,7 @@ class FDOTCityExplorer:
             st.error("❌ Error displaying map. Please try refreshing the page.")
     
     def render_data_tabs(self):
-        """Render the data analysis tabs"""
+        """Render the simplified data analysis tabs"""
         try:
             cities = self.city_controller.get_session_cities()
             
@@ -121,49 +115,27 @@ class FDOTCityExplorer:
             
             st.markdown("---")
             
-            # Create tabs for different views
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "🚦 Traffic Data",
-                "🛣️ Street Data",
+            # Create simplified tabs for core functionality
+            tab1, tab2, tab3 = st.tabs([
                 "📊 City Data", 
-                "📈 Analytics", 
-                "📋 Summary"
+                "📈 Analytics",
+                "🚦 Traffic Data"
             ])
             
             with tab1:
-                self.render_traffic_tab()
-            
-            with tab2:
-                self.render_street_tab()
-            
-            with tab3:
                 self.render_city_data_tab(cities)
             
-            with tab4:
+            with tab2:
                 self.render_analytics_tab(cities)
             
-            with tab5:
-                self.render_summary_tab(cities)
+            with tab3:
+                self.render_traffic_data_tab()
                 
         except Exception as e:
             logger.error(f"Error rendering data tabs: {e}")
             st.error("❌ Error displaying data tabs")
     
-    def render_traffic_tab(self):
-        """Render the traffic data tab"""
-        try:
-            self.map_view.display_traffic_data_tab()
-        except Exception as e:
-            logger.error(f"Error rendering traffic tab: {e}")
-            st.error("❌ Error displaying traffic data")
-    
-    def render_street_tab(self):
-        """Render the street data tab"""
-        try:
-            self.street_view.display_street_tab_content()
-        except Exception as e:
-            logger.error(f"Error rendering street tab: {e}")
-            st.error("❌ Error displaying street data")
+
     
     def render_city_data_tab(self, cities: CityCollection):
         """Render the city data tab"""
@@ -190,14 +162,32 @@ class FDOTCityExplorer:
             logger.error(f"Error rendering analytics tab: {e}")
             st.error("❌ Error displaying analytics")
     
-    def render_summary_tab(self, cities: CityCollection):
-        """Render the summary statistics tab"""
+    def render_traffic_data_tab(self):
+        """Render the traffic data tab"""
         try:
-            self.city_view.display_summary_statistics(cities)
+            traffic_data = st.session_state.get('traffic_data')
+            if traffic_data:
+                self.city_view.display_traffic_data(traffic_data)
+            else:
+                st.info("🚦 No traffic data available. Enable 'Fetch traffic data' when fetching cities to load traffic information.")
+                
+                # Provide option to fetch traffic data separately
+                if st.button("🚦 Fetch Traffic Data Now", type="primary"):
+                    with st.spinner("🚦 Fetching traffic data..."):
+                        traffic_data = self.city_controller.fetch_traffic_data()
+                        if traffic_data:
+                            self.city_controller.save_traffic_data_to_json(traffic_data)
+                            st.session_state.traffic_data = traffic_data
+                            st.success("✅ Traffic data fetched successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to fetch traffic data")
             
         except Exception as e:
-            logger.error(f"Error rendering summary tab: {e}")
-            st.error("❌ Error displaying summary statistics")
+            logger.error(f"Error rendering traffic data tab: {e}")
+            st.error("❌ Error displaying traffic data")
+    
+
     
     def render_simplified_data_tabs(self, cities: CityCollection):
         """
@@ -210,8 +200,8 @@ class FDOTCityExplorer:
             # Create simplified tabs for data analysis
             tab1, tab2, tab3 = st.tabs([
                 "📊 City Data", 
-                "🚦 Traffic Analysis", 
-                "📈 Summary Stats"
+                "📈 Analytics",
+                "🚦 Traffic Data"
             ])
             
             with tab1:
@@ -220,12 +210,12 @@ class FDOTCityExplorer:
                 self.city_view.display_city_data_main(cities, filters)
             
             with tab2:
-                # Traffic analysis
-                self.render_traffic_tab()
+                # Analytics
+                self.city_view.create_charts(cities)
             
             with tab3:
-                # Summary statistics
-                self.render_summary_tab(cities)
+                # Traffic data
+                self.render_traffic_data_tab()
                 
         except Exception as e:
             logger.error(f"Error rendering simplified data tabs: {e}")

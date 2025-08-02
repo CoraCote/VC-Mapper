@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import logging
 from typing import Dict, Optional
-from models.city_model import City, CityCollection
+from models.city_model import City, CityCollection, TrafficDataCollection
 from controllers.city_controller import CityController
 
 logger = logging.getLogger(__name__)
@@ -44,33 +44,39 @@ class CityView:
                 
                 # Different settings based on action
                 if action == "🌍 Fetch All Cities":
-                    limit = st.slider(
-                        "Number of cities",
-                        min_value=5,
-                        max_value=500,
-                        value=50,
-                        step=5,
-                        help="Limit the number of cities to fetch"
-                    )
-                    fetch_button = st.button("🚀 FETCH CITY", type="primary", use_container_width=True)
-                    params = {"limit": limit, "button": fetch_button}
+                    st.info("⚠️ Will fetch ALL cities from the database (no limit). This may take some time...")
                     
+                    save_to_file = st.checkbox(
+                        "Save to JSON file",
+                        value=True,  # Auto-checked by default
+                        help="Save the fetched cities data to a local JSON file"
+                    )
+                    
+                    fetch_traffic = st.checkbox(
+                        "Fetch traffic data",
+                        value=False,
+                        help="Also fetch traffic data from the AADT API"
+                    )
+                    
+                    fetch_button = st.button("🚀 FETCH ALL CITIES", type="primary", use_container_width=True)
+                    params = {
+                        "limit": None,  # Always no limit
+                        "button": fetch_button, 
+                        "fetch_all": True,  # Always fetch all
+                        "save_to_file": save_to_file,
+                        "fetch_traffic": fetch_traffic
+                    }
+
                 elif action == "🔍 Search Cities":
                     search_query = st.text_input(
                         "City name",
                         placeholder="e.g., Miami, Orlando, Tampa",
-                        help="Enter part of a city name to search"
+                        help="Enter the name of the city to search for"
                     )
-                    search_limit = st.slider(
-                        "Max results",
-                        min_value=1,
-                        max_value=50,
-                        value=15,
-                        help="Maximum number of search results"
-                    )
-                    search_button = st.button("🔍 Search", type="primary", use_container_width=True)
-                    params = {"query": search_query, "limit": search_limit, "button": search_button}
+                    search_button = st.button("🔍 SEARCH", type="primary", use_container_width=True)
+                    params = {"query": search_query, "button": search_button}
                     
+
                 elif action == "📍 Get by GEOID":
                     geoid = st.text_input(
                         "GEOID",
@@ -399,6 +405,15 @@ class CityView:
                         <li>📊 <strong>Data Tables</strong> - Browse detailed city information</li>
                         <li>📈 <strong>Analytics</strong> - Discover insights with charts and statistics</li>
                         <li>🔍 <strong>Smart Search</strong> - Find cities by name or GEOID</li>
+                        <li>🚦 <strong>Traffic Data</strong> - Fetch and analyze traffic information</li>
+                        <li>💾 <strong>Data Export</strong> - Save data as JSON files locally</li>
+                    </ul>
+                    <h5>✨ New Features:</h5>
+                    <ul>
+                        <li>🌍 <strong>Fetch ALL Cities</strong> - No more limits when fetching city data</li>
+                        <li>🔍 <strong>Search Cities</strong> - Search for specific cities by name</li>
+                        <li>🚦 <strong>Traffic Data Integration</strong> - Fetch Annual Average Daily Traffic data</li>
+                        <li>💾 <strong>JSON Export</strong> - Automatically save data to local files</li>
                     </ul>
                     <p><strong>👈 Start by selecting a data source from the sidebar!</strong></p>
                 </div>
@@ -425,3 +440,145 @@ class CityView:
             logger.error(f"Error handling data fetch: {e}")
             st.error(f"❌ Error: {str(e)}")
             return False
+    
+    def display_traffic_data(self, traffic_data: Dict) -> None:
+        """
+        Display traffic data in a dedicated section
+        
+        Args:
+            traffic_data: GeoJSON traffic data from the API
+        """
+        try:
+            if not traffic_data or 'features' not in traffic_data:
+                st.info("🚦 No traffic data available")
+                return
+            
+            # Create traffic data collection
+            traffic_collection = TrafficDataCollection(traffic_data)
+            
+            st.markdown("### 🚦 Traffic Data Analysis")
+            
+            # Display summary statistics
+            stats = traffic_collection.get_traffic_summary_stats()
+            if stats:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Total Records", f"{stats.get('total_records', 0):,}")
+                with col2:
+                    st.metric("Avg AADT", f"{stats.get('avg_aadt', 0):,.0f}")
+                with col3:
+                    st.metric("Max AADT", f"{stats.get('max_aadt', 0):,}")
+                with col4:
+                    st.metric("Counties", stats.get('unique_counties', 0))
+            
+            # Convert to DataFrame and display
+            traffic_df = traffic_collection.to_dataframe()
+            
+            if not traffic_df.empty:
+                # Traffic data filters
+                st.markdown("#### 🔍 Filter Traffic Data")
+                filter_col1, filter_col2 = st.columns(2)
+                
+                with filter_col1:
+                    counties = traffic_df['County'].dropna().unique().tolist()
+                    selected_county = st.selectbox(
+                        "Filter by County",
+                        ["All"] + sorted(counties),
+                        help="Select a county to filter traffic data"
+                    )
+                
+                with filter_col2:
+                    min_aadt = st.number_input(
+                        "Minimum AADT",
+                        min_value=0,
+                        max_value=int(traffic_df['AADT'].max()) if not traffic_df['AADT'].empty else 100000,
+                        value=0,
+                        step=1000,
+                        help="Filter roads with minimum Annual Average Daily Traffic"
+                    )
+                
+                # Apply filters
+                filtered_df = traffic_df.copy()
+                if selected_county != "All":
+                    filtered_df = filtered_df[filtered_df['County'] == selected_county]
+                if min_aadt > 0:
+                    filtered_df = filtered_df[filtered_df['AADT'] >= min_aadt]
+                
+                # Display filtered data
+                st.markdown(f"#### 📊 Traffic Data Table ({len(filtered_df)} records)")
+                self._display_paginated_data_table(filtered_df, "traffic_data")
+                
+                # Traffic charts
+                if len(filtered_df) > 0:
+                    self._create_traffic_charts(filtered_df)
+            
+        except Exception as e:
+            logger.error(f"Error displaying traffic data: {e}")
+            st.error("❌ Error displaying traffic data")
+    
+    def _create_traffic_charts(self, traffic_df: pd.DataFrame) -> None:
+        """
+        Create charts for traffic data analysis
+        
+        Args:
+            traffic_df: DataFrame containing traffic data
+        """
+        try:
+            st.markdown("#### 📈 Traffic Analytics")
+            
+            chart_col1, chart_col2 = st.columns(2)
+            
+            with chart_col1:
+                # AADT distribution histogram
+                if 'AADT' in traffic_df.columns and not traffic_df['AADT'].empty:
+                    fig_aadt = px.histogram(
+                        traffic_df[traffic_df['AADT'] > 0], 
+                        x='AADT',
+                        nbins=min(30, len(traffic_df)),
+                        title="AADT Distribution",
+                        labels={'AADT': 'Annual Average Daily Traffic', 'count': 'Number of Roads'},
+                        color_discrete_sequence=['#FF6B6B']
+                    )
+                    fig_aadt.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        font_color='#2a5298'
+                    )
+                    st.plotly_chart(fig_aadt, use_container_width=True)
+            
+            with chart_col2:
+                # Traffic by county
+                if 'County' in traffic_df.columns and not traffic_df['County'].empty:
+                    county_traffic = traffic_df.groupby('County')['AADT'].mean().sort_values(ascending=False).head(10)
+                    if len(county_traffic) > 0:
+                        fig_county = px.bar(
+                            x=county_traffic.values,
+                            y=county_traffic.index,
+                            orientation='h',
+                            title="Average AADT by County (Top 10)",
+                            labels={'x': 'Average AADT', 'y': 'County'},
+                            color=county_traffic.values,
+                            color_continuous_scale='Viridis'
+                        )
+                        fig_county.update_layout(
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            font_color='#2a5298',
+                            yaxis={'categoryorder': 'total ascending'}
+                        )
+                        st.plotly_chart(fig_county, use_container_width=True)
+            
+            # High traffic roads table
+            high_traffic = traffic_df[traffic_df['AADT'] >= 20000].nlargest(10, 'AADT') if 'AADT' in traffic_df.columns else pd.DataFrame()
+            if not high_traffic.empty:
+                st.markdown("#### 🔥 Highest Traffic Roads")
+                st.dataframe(
+                    high_traffic[['Roadway', 'County', 'AADT', 'Route']],
+                    use_container_width=True,
+                    height=300
+                )
+            
+        except Exception as e:
+            logger.error(f"Error creating traffic charts: {e}")
+            st.error("❌ Error creating traffic charts")

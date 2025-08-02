@@ -31,23 +31,33 @@ class CityController:
         
         self.city_collection = CityCollection()
     
-    def fetch_all_cities(self, limit: int = 50) -> CityCollection:
+    def fetch_all_cities(self, limit: Optional[int] = None, save_to_file: bool = False) -> CityCollection:
         """
         Fetch all cities from FDOT API
         
         Args:
-            limit: Maximum number of cities to fetch
+            limit: Maximum number of cities to fetch (None for unlimited)
+            save_to_file: Whether to save the data to a local JSON file
             
         Returns:
             CityCollection object with fetched cities
         """
         try:
-            logger.info(f"Fetching {limit} cities from FDOT API")
+            if limit is None:
+                logger.info("Fetching ALL cities from FDOT API (no limit)")
+            else:
+                logger.info(f"Fetching {limit} cities from FDOT API")
+            
             cities_data = self._fetch_cities_from_api(limit=limit)
             
             if cities_data:
                 self.city_collection = CityCollection(cities_data)
                 logger.info(f"Successfully fetched {len(self.city_collection)} cities")
+                
+                # Save to JSON file if requested
+                if save_to_file:
+                    self._save_cities_to_json(self.city_collection)
+                
                 return self.city_collection
             else:
                 logger.warning("No cities data received from API")
@@ -57,31 +67,54 @@ class CityController:
             logger.error(f"Error fetching cities: {e}")
             return CityCollection()
     
-    def search_cities(self, query: str, limit: int = 15) -> CityCollection:
+
+    
+    def search_cities(self, query: str) -> CityCollection:
         """
-        Search for cities by name
+        Search for cities by name using FDOT API
         
         Args:
-            query: Search query string
-            limit: Maximum number of results
+            query: Search query (city name)
             
         Returns:
-            CityCollection object with search results
+            CityCollection with matching cities
         """
         try:
-            logger.info(f"Searching for cities matching '{query}'")
-            cities_data = self._search_cities_from_api(query, limit)
+            logger.info(f"Starting search for cities matching '{query}' (no limit)")
             
-            if cities_data:
-                self.city_collection = CityCollection(cities_data)
-                logger.info(f"Found {len(self.city_collection)} cities matching '{query}'")
-                return self.city_collection
-            else:
-                logger.warning(f"No cities found matching '{query}'")
+            # Clean and escape the query
+            clean_query = query.strip()
+            if not clean_query:
+                logger.warning("Empty search query provided")
                 return CityCollection()
-                
+            
+            escaped_query = clean_query.replace("'", "''")  # Escape single quotes for SQL
+            logger.info(f"Searching cities with query '{query}' (escaped: '{escaped_query}')")
+            
+            # Try multiple search strategies
+            search_strategies = [
+                ("exact", f"NAME = '{escaped_query}'"),
+                ("starts_with", f"NAME LIKE '{escaped_query}%'"),
+                ("contains", f"NAME LIKE '%{escaped_query}%'"),
+                ("fuzzy", f"UPPER(NAME) LIKE '%{escaped_query.upper()}%'")
+            ]
+            
+            for strategy_name, where_clause in search_strategies:
+                try:
+                    cities_data = self._search_cities_from_api(where_clause)
+                    if cities_data:
+                        city_collection = CityCollection(cities_data)
+                        logger.info(f"Found {len(city_collection)} cities using {strategy_name} search")
+                        return city_collection
+                except Exception as e:
+                    logger.error(f"FDOT API error for {strategy_name} search '{query}': {e}")
+                    continue
+            
+            logger.warning(f"No cities found for any search strategy with query: '{query}'")
+            return CityCollection()
+            
         except Exception as e:
-            logger.error(f"Error searching cities: {e}")
+            logger.error(f"Error searching for cities: {e}")
             return CityCollection()
     
     def get_city_by_geoid(self, geoid: str) -> Optional[City]:
@@ -270,17 +303,42 @@ class CityController:
         """
         try:
             if action == "🌍 Fetch All Cities" and params.get("button"):
-                cities = self.fetch_all_cities(limit=params.get("limit", 50))
+                # Determine if we should fetch all cities (no limit)
+                fetch_all = params.get("fetch_all", False)
+                limit = None if fetch_all else params.get("limit", 50)
+                save_to_file = params.get("save_to_file", False)
+                
+                with st.spinner("🔄 Fetching cities data..."):
+                    cities = self.fetch_all_cities(limit=limit, save_to_file=save_to_file)
+                    
                 if cities.cities:
                     self.save_to_session(cities)
-                    st.success(f"✅ Successfully fetched {len(cities)} cities!")
+                    
+                    # Fetch traffic data if requested
+                    if params.get("fetch_traffic", False):
+                        with st.spinner("🚦 Fetching traffic data..."):
+                            traffic_data = self.fetch_traffic_data()
+                            if traffic_data:
+                                self.save_traffic_data_to_json(traffic_data)
+                                st.session_state.traffic_data = traffic_data
+                                st.success(f"✅ Successfully fetched {len(cities)} cities and traffic data!")
+                            else:
+                                st.warning("⚠️ Cities fetched successfully, but traffic data failed to load.")
+                    else:
+                        if save_to_file:
+                            st.success(f"✅ Successfully fetched {len(cities)} cities and saved to JSON file!")
+                        else:
+                            st.success(f"✅ Successfully fetched {len(cities)} cities!")
+                    
                     return True
                 else:
                     st.error("❌ Failed to fetch cities. Please check the API connection.")
                     return False
-            
+
             elif action == "🔍 Search Cities" and params.get("button") and params.get("query"):
-                cities = self.search_cities(params["query"], params.get("limit", 15))
+                with st.spinner("🔍 Searching cities..."):
+                    cities = self.search_cities(params["query"])
+                    
                 if cities.cities:
                     self.save_to_session(cities)
                     st.success(f"✅ Found {len(cities)} cities matching '{params['query']}'!")
@@ -288,11 +346,14 @@ class CityController:
                 else:
                     st.warning(f"⚠️ No cities found matching '{params['query']}'")
                     return False
-            
+
             elif action == "📍 Get by GEOID" and params.get("button") and params.get("geoid"):
                 city = self.get_city_by_geoid(params["geoid"])
                 if city:
-                    st.success(f"✅ Found city: {city.name}")
+                    # Auto-select the found city for automatic scaling
+                    st.session_state.selected_city = city.to_dict()
+                    st.session_state.auto_scaled_city = True  # Flag for auto-scaling
+                    st.success(f"✅ Found city: **{city.name}** - Auto-zooming to city area!")
                     return True
                 else:
                     st.error(f"❌ No city found with GEOID {params['geoid']}")
@@ -362,49 +423,150 @@ class CityController:
         except Exception as e:
             logger.error(f"Unexpected error fetching cities: {e}")
             return []
-    
-    def _search_cities_from_api(self, query: str, limit: Optional[int] = 10) -> List[Dict]:
+
+    def _save_cities_to_json(self, cities: CityCollection) -> bool:
         """
-        Search for cities by name using FDOT GIS API with enhanced search capabilities
+        Save cities data to a local JSON file
         
         Args:
-            query: Search query string
-            limit: Optional limit on number of results
+            cities: CityCollection to save
             
         Returns:
-            List of matching city dictionaries
+            True if successful, False otherwise
         """
         try:
-            # Clean and prepare search query
-            query_clean = query.strip()
-            if not query_clean:
-                return []
+            import json
+            import os
+            from datetime import datetime
             
-            # Build multiple search patterns for better results
-            # Try exact match first, then partial matches
-            search_patterns = [
-                f"NAME = '{query_clean.upper()}'",  # Exact match (case insensitive)
-                f"FULLNAME = '{query_clean.upper()}'",  # Exact match on full name
-                f"NAME LIKE '{query_clean.upper()}%'",  # Starts with query
-                f"FULLNAME LIKE '{query_clean.upper()}%'",  # Starts with query in full name
-                f"NAME LIKE '%{query_clean.upper()}%'",  # Contains query anywhere
-                f"FULLNAME LIKE '%{query_clean.upper()}%'"  # Contains query anywhere in full name
-            ]
+            # Create data directory if it doesn't exist
+            data_dir = "data"
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
             
-            # Combine all patterns with OR
-            where_clause = " OR ".join(search_patterns)
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{data_dir}/cities_data_{timestamp}.json"
             
+            # Prepare data for JSON serialization
+            cities_data = {
+                "metadata": {
+                    "total_cities": len(cities),
+                    "fetch_timestamp": datetime.now().isoformat(),
+                    "source": "FDOT GIS API"
+                },
+                "cities": cities.get_cities_as_dict_list()
+            }
+            
+            # Save to JSON file
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(cities_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Successfully saved {len(cities)} cities to {filename}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving cities to JSON: {e}")
+            return False
+
+    def fetch_traffic_data(self) -> Dict:
+        """
+        Fetch traffic data from the Annual Average Daily Traffic API
+        
+        Returns:
+            Dictionary containing traffic data
+        """
+        try:
+            traffic_url = "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Annual_Average_Daily_Traffic_TDA/FeatureServer/0/query"
+            
+            params = {
+                'outFields': '*',
+                'where': '1=1',
+                'f': 'geojson'
+            }
+            
+            logger.info("Fetching traffic data from AADT API...")
+            
+            response = self.session.get(traffic_url, params=params, timeout=60)
+            response.raise_for_status()
+            
+            # Parse GeoJSON response
+            traffic_data = response.json()
+            
+            if 'features' in traffic_data:
+                logger.info(f"Successfully fetched {len(traffic_data['features'])} traffic records")
+                return traffic_data
+            else:
+                logger.warning("No features found in traffic data response")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error fetching traffic data: {e}")
+            return {}
+
+    def save_traffic_data_to_json(self, traffic_data: Dict) -> bool:
+        """
+        Save traffic data to a local JSON file
+        
+        Args:
+            traffic_data: Traffic data dictionary to save
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            import json
+            import os
+            from datetime import datetime
+            
+            # Create data directory if it doesn't exist
+            data_dir = "data"
+            if not os.path.exists(data_dir):
+                os.makedirs(data_dir)
+            
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{data_dir}/traffic_data_{timestamp}.json"
+            
+            # Prepare data with metadata
+            data_to_save = {
+                "metadata": {
+                    "total_records": len(traffic_data.get('features', [])),
+                    "fetch_timestamp": datetime.now().isoformat(),
+                    "source": "Annual Average Daily Traffic TDA API"
+                },
+                "traffic_data": traffic_data
+            }
+            
+            # Save to JSON file
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Successfully saved traffic data to {filename}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving traffic data to JSON: {e}")
+            return False
+
+    
+    def _search_cities_from_api(self, where_clause: str) -> List[Dict]:
+        """
+        Search for cities using FDOT GIS API with a custom WHERE clause
+        
+        Args:
+            where_clause: SQL WHERE clause for the search
+            
+        Returns:
+            List of city dictionaries
+        """
+        try:
             params = {
                 'where': where_clause,
                 'outFields': '*',
                 'f': 'json',
                 'returnGeometry': 'true'
             }
-            
-            if limit:
-                params['resultRecordCount'] = limit
-            
-            logger.info(f"Searching cities with query '{query_clean}' using enhanced search patterns")
             
             # Make the API request
             response = self.session.get(self.city_boundaries_url, params=params, timeout=30)
@@ -414,49 +576,28 @@ class CityController:
             data = response.json()
             
             if 'features' not in data:
-                logger.warning(f"No features found for search query: {query_clean}")
                 return []
             
             # Extract and format city data
             cities = []
-            seen_geoids = set()  # Prevent duplicates
-            
             for feature in data['features']:
                 if 'attributes' in feature:
                     city_data = self._format_city_data(feature)
-                    if city_data and city_data['geoid'] not in seen_geoids:
+                    if city_data:
                         cities.append(city_data)
-                        seen_geoids.add(city_data['geoid'])
             
-            # Sort results by relevance - exact matches first, then partial matches
-            cities_sorted = sorted(cities, key=lambda x: (
-                # Primary sort: exact match gets priority
-                0 if x['name'].upper() == query_clean.upper() else 1,
-                # Secondary sort: starts with gets priority over contains
-                0 if x['name'].upper().startswith(query_clean.upper()) else 1,
-                # Tertiary sort: alphabetical
-                x['name']
-            ))
-            
-            logger.info(f"Found {len(cities_sorted)} unique cities matching '{query_clean}'")
-            
-            # Log first few results for debugging
-            if cities_sorted:
-                result_names = [city['name'] for city in cities_sorted[:5]]
-                logger.info(f"Top results: {result_names}")
-            
-            return cities_sorted
+            return cities
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error searching cities: {e}")
+            logger.error(f"Error searching cities from FDOT GIS API: {e}")
             return []
         except json.JSONDecodeError as e:
-            logger.error(f"Error parsing search response: {e}")
+            logger.error(f"Error parsing search response from FDOT GIS API: {e}")
             return []
         except Exception as e:
             logger.error(f"Unexpected error searching cities: {e}")
             return []
-    
+
     def _get_city_by_geoid_from_api(self, geoid: str) -> Optional[Dict]:
         """
         Get a specific city by GEOID using FDOT GIS API
