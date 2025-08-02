@@ -314,14 +314,16 @@ class CityController:
                 if cities.cities:
                     self.save_to_session(cities)
                     
-                    # Fetch traffic data if requested
+                    # Fetch traffic data if requested (always unlimited)
                     if params.get("fetch_traffic", False):
-                        with st.spinner("🚦 Fetching traffic data..."):
-                            traffic_data = self.fetch_traffic_data()
+                        with st.spinner("🚦 Fetching ALL traffic data (unlimited mode)..."):
+                            # Use pagination method for complete data fetching
+                            traffic_data = self.fetch_traffic_data_with_pagination()
                             if traffic_data:
                                 self.save_traffic_data_to_json(traffic_data)
                                 st.session_state.traffic_data = traffic_data
-                                st.success(f"✅ Successfully fetched {len(cities)} cities and traffic data!")
+                                record_count = len(traffic_data.get('features', []))
+                                st.success(f"✅ Successfully fetched {len(cities)} cities and {record_count} traffic records!")
                             else:
                                 st.warning("⚠️ Cities fetched successfully, but traffic data failed to load.")
                     else:
@@ -468,10 +470,13 @@ class CityController:
             logger.error(f"Error saving cities to JSON: {e}")
             return False
 
-    def fetch_traffic_data(self) -> Dict:
+    def fetch_traffic_data(self, limit: Optional[int] = None) -> Dict:
         """
         Fetch traffic data from the Annual Average Daily Traffic API
         
+        Args:
+            limit: Maximum number of records to fetch (None for all available)
+            
         Returns:
             Dictionary containing traffic data
         """
@@ -484,16 +489,32 @@ class CityController:
                 'f': 'geojson'
             }
             
-            logger.info("Fetching traffic data from AADT API...")
+            # Add limit if specified
+            if limit:
+                params['resultRecordCount'] = limit
+                logger.info(f"Fetching traffic data with limit of {limit} records...")
+            else:
+                logger.info("Fetching ALL traffic data (no limit)...")
             
-            response = self.session.get(traffic_url, params=params, timeout=60)
+            # Increase timeout for large datasets
+            timeout = 120 if limit is None else 60
+            
+            response = self.session.get(traffic_url, params=params, timeout=timeout)
             response.raise_for_status()
             
             # Parse GeoJSON response
             traffic_data = response.json()
             
             if 'features' in traffic_data:
-                logger.info(f"Successfully fetched {len(traffic_data['features'])} traffic records")
+                record_count = len(traffic_data['features'])
+                logger.info(f"Successfully fetched {record_count} traffic records")
+                
+                # Check if we got all records (if no limit was set)
+                if limit is None and record_count > 0:
+                    # Check if there might be more records (ArcGIS often limits to 1000-2000)
+                    if record_count >= 1000:
+                        logger.warning(f"Fetched {record_count} records. ArcGIS APIs often have default limits. Consider using pagination for complete dataset.")
+                
                 return traffic_data
             else:
                 logger.warning("No features found in traffic data response")
@@ -610,6 +631,78 @@ class CityController:
         except Exception as e:
             logger.error(f"Error loading traffic data from JSON: {e}")
             return None
+
+    def fetch_traffic_data_with_pagination(self, max_records: Optional[int] = None) -> Dict:
+        """
+        Fetch traffic data with pagination to handle large datasets
+        
+        Args:
+            max_records: Maximum total records to fetch (None for all available)
+            
+        Returns:
+            Dictionary containing complete traffic data
+        """
+        try:
+            traffic_url = "https://services1.arcgis.com/O1JpcwDW8sjYuddV/arcgis/rest/services/Annual_Average_Daily_Traffic_TDA/FeatureServer/0/query"
+            
+            all_features = []
+            offset = 0
+            batch_size = 1000  # ArcGIS default limit
+            
+            logger.info("Fetching traffic data with pagination...")
+            
+            while True:
+                params = {
+                    'outFields': '*',
+                    'where': '1=1',
+                    'f': 'geojson',
+                    'resultOffset': offset,
+                    'resultRecordCount': batch_size
+                }
+                
+                response = self.session.get(traffic_url, params=params, timeout=60)
+                response.raise_for_status()
+                
+                traffic_data = response.json()
+                
+                if 'features' not in traffic_data or not traffic_data['features']:
+                    break
+                
+                features = traffic_data['features']
+                all_features.extend(features)
+                
+                logger.info(f"Fetched batch: {len(features)} records (total: {len(all_features)})")
+                
+                # Check if we've reached the limit
+                if max_records and len(all_features) >= max_records:
+                    all_features = all_features[:max_records]
+                    break
+                
+                # Check if we got fewer records than requested (end of data)
+                if len(features) < batch_size:
+                    break
+                
+                offset += batch_size
+                
+                # Safety check to prevent infinite loops
+                if offset > 50000:  # Maximum reasonable offset
+                    logger.warning("Reached maximum offset limit, stopping pagination")
+                    break
+            
+            if all_features:
+                complete_data = {
+                    'type': 'FeatureCollection',
+                    'features': all_features
+                }
+                logger.info(f"Successfully fetched {len(all_features)} traffic records with pagination")
+                return complete_data
+            else:
+                logger.warning("No traffic records found")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Error fetching traffic data with pagination: {e}")
+            return {}
 
     
     def _search_cities_from_api(self, where_clause: str) -> List[Dict]:
