@@ -33,13 +33,16 @@ class MapView:
         Display a map showing only the Florida state boundary using Mapbox
         """
         try:
-            # Create Florida map with real boundary data
-            deck = self.mapbox_controller.create_florida_map()
+            # Always load traffic data for map display
+            traffic_data = self._get_traffic_data_for_map()
+            
+            # Create Florida map with real boundary data and traffic
+            deck = self.mapbox_controller.create_florida_map(traffic_data=traffic_data)
             
             # Display the map
             with st.container():
                 st.markdown('<div class="map-container">', unsafe_allow_html=True)
-                st.info("📍 Now showing Florida with **real boundary data** from ArcGIS API! Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
+                st.info("📍 Now showing Florida with **real boundary data** and **traffic roadway segments**! Press the 'FETCH CITY' button from the sidebar to load city data and explore specific locations.")
                 
                 # Display map style selector
                 col1, col2 = st.columns([3, 1])
@@ -69,7 +72,10 @@ class MapView:
                 st.pydeck_chart(deck, use_container_width=True, height=600)
                 
                 # Show data source info
-                st.success("🌍 **Real-time Florida boundary data** fetched from ArcGIS API")
+                if traffic_data:
+                    st.success("🌍 **Real-time Florida boundary data** and **🚦 traffic roadway segments** loaded!")
+                else:
+                    st.success("🌍 **Real-time Florida boundary data** fetched from ArcGIS API")
                 st.markdown('</div>', unsafe_allow_html=True)
                 
         except Exception as e:
@@ -118,7 +124,7 @@ class MapView:
         """
         try:
             # Top section: Simple selectors
-            st.markdown("### 📍 Select District, County, City")
+            st.markdown("### 📍 Select City")
             self._render_location_selectors(valid_cities)
             
             st.markdown("---")
@@ -154,91 +160,45 @@ class MapView:
     
     def _render_location_selectors(self, valid_cities: CityCollection) -> None:
         """
-        Render simple district, county, city selectors
+        Render simple city selector
         
         Args:
             valid_cities: Collection of cities for dropdown options
         """
         try:
-            col1, col2, col3 = st.columns(3)
+            # Simple city selector without district/county filters
+            city_options = ["All Cities"] + [city.get_display_name() for city in valid_cities.cities]
             
-            with col1:
-                # Get unique districts (using state FIPS as district)
-                districts = list(set(city.state_fips for city in valid_cities.cities if city.state_fips))
-                selected_district = st.selectbox(
-                    "District",
-                    ["All Districts"] + sorted(districts),
-                    key="district_selector"
-                )
+            # Handle auto-scaled city selection
+            default_index = 0  # Default to "All Cities"
+            if st.session_state.get('auto_scaled_city', False) and st.session_state.get('selected_city'):
+                # Find the auto-selected city in the dropdown
+                auto_selected_city_name = st.session_state.selected_city.get('name', '')
+                city_found = False
+                for i, city in enumerate(valid_cities.cities):
+                    if city.name == auto_selected_city_name:
+                        default_index = i + 1  # +1 because of "All Cities" at index 0
+                        city_found = True
+                        break
+                
+                # If city not found, reset to "All Cities"
+                if not city_found:
+                    default_index = 0
             
-            with col2:
-                # County selector - simplified since county data may not be available
-                # Using place_fips as a proxy for county grouping
-                if selected_district == "All Districts":
-                    available_cities = valid_cities.cities
-                else:
-                    available_cities = [city for city in valid_cities.cities 
-                                     if city.state_fips == selected_district]
-                
-                # Extract county-like groupings from place_fips (first 3 digits typically represent county)
-                county_codes = list(set(city.place_fips[:3] if len(city.place_fips) >= 3 else 'N/A' 
-                                       for city in available_cities if city.place_fips))
-                if not county_codes or county_codes == ['N/A']:
-                    county_codes = ["No County Data"]
-                
-                selected_county = st.selectbox(
-                    "County Area", 
-                    ["All Areas"] + sorted(county_codes),
-                    key="county_selector",
-                    help="Grouped by place code prefix"
-                )
+            selected_city_option = st.selectbox(
+                "City",
+                city_options,
+                index=default_index,
+                key="city_selector"
+            )
             
-            with col3:
-                # Get cities based on selected district and county area
-                if selected_county == "All Areas":
-                    filtered_cities = available_cities
-                else:
-                    # Filter by place_fips prefix if county code is selected
-                    if selected_county != "No County Data":
-                        filtered_cities = [city for city in available_cities 
-                                         if city.place_fips.startswith(selected_county)]
-                    else:
-                        filtered_cities = available_cities
+            # Update session state with selected city
+            if selected_city_option != "All Cities":
+                city_index = city_options.index(selected_city_option) - 1
+                st.session_state.selected_city = valid_cities.cities[city_index].to_dict()
+            else:
+                st.session_state.selected_city = None
                 
-                city_options = ["All Cities"] + [city.get_display_name() for city in filtered_cities]
-                
-                # Handle auto-scaled city selection
-                default_index = 0  # Default to "All Cities"
-                if st.session_state.get('auto_scaled_city', False) and st.session_state.get('selected_city'):
-                    # Find the auto-selected city in the dropdown
-                    auto_selected_city_name = st.session_state.selected_city.get('name', '')
-                    city_found = False
-                    for i, city in enumerate(filtered_cities):
-                        if city.name == auto_selected_city_name:
-                            default_index = i + 1  # +1 because of "All Cities" at index 0
-                            city_found = True
-                            break
-                    
-                    # If city not found in current filter, reset the filters to show all
-                    if not city_found:
-                        # The city might be in a different district/county filter
-                        # For now, just clear the selection
-                        default_index = 0
-                
-                selected_city_option = st.selectbox(
-                    "City",
-                    city_options,
-                    index=default_index,
-                    key="city_selector"
-                )
-                
-                # Update session state with selected city
-                if selected_city_option != "All Cities":
-                    city_index = city_options.index(selected_city_option) - 1
-                    st.session_state.selected_city = filtered_cities[city_index].to_dict()
-                else:
-                    st.session_state.selected_city = None
-                    
         except Exception as e:
             logger.error(f"Error rendering location selectors: {e}")
             st.error("Error in location selectors")
@@ -449,11 +409,15 @@ class MapView:
                 # Clear the auto-scale flag after displaying the indicator
                 st.session_state.auto_scaled_city = False
             
+            # Always load traffic data for map display
+            traffic_data = self._get_traffic_data_for_map()
+            
             # Create map with simplified settings
             deck = self.mapbox_controller.create_florida_map(
                 cities=valid_cities,
                 selected_city=selected_city,
                 show_only_selected=(selected_city is not None),
+                traffic_data=traffic_data,
                 map_style=map_style
             )
             
@@ -463,6 +427,79 @@ class MapView:
         except Exception as e:
             logger.error(f"Error rendering main map area: {e}")
             st.error("Error displaying map")
+    
+    def _get_traffic_data_for_map(self) -> Optional[Dict]:
+        """
+        Always load traffic data for map display
+        
+        Returns:
+            Traffic data dictionary or None if not available
+        """
+        try:
+            # First check if traffic data is already in session state
+            if st.session_state.get('traffic_data'):
+                return st.session_state.traffic_data
+            
+            # If not in session state, try to load from saved JSON files
+            traffic_data = self._load_traffic_data_from_files()
+            if traffic_data:
+                # Save to session state for future use
+                st.session_state.traffic_data = traffic_data
+                return traffic_data
+            
+            # If no saved data, fetch fresh traffic data
+            with st.spinner("🚦 Loading traffic data..."):
+                traffic_data = self.city_controller.fetch_traffic_data()
+                if traffic_data:
+                    # Save to session state and file
+                    st.session_state.traffic_data = traffic_data
+                    self.city_controller.save_traffic_data_to_json(traffic_data)
+                    return traffic_data
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error loading traffic data for map: {e}")
+            return None
+    
+    def _load_traffic_data_from_files(self) -> Optional[Dict]:
+        """
+        Load traffic data from saved JSON files
+        
+        Returns:
+            Traffic data dictionary or None if no files found
+        """
+        try:
+            import os
+            import json
+            import glob
+            
+            # Look for traffic data files in the data directory
+            data_dir = "data"
+            if not os.path.exists(data_dir):
+                return None
+            
+            # Find the most recent traffic data file
+            traffic_files = glob.glob(os.path.join(data_dir, "traffic_data_*.json"))
+            if not traffic_files:
+                return None
+            
+            # Sort by modification time (most recent first)
+            traffic_files.sort(key=os.path.getmtime, reverse=True)
+            latest_file = traffic_files[0]
+            
+            # Load the most recent traffic data
+            with open(latest_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if 'traffic_data' in data:
+                    logger.info(f"Loaded traffic data from {latest_file}")
+                    return data['traffic_data']
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error loading traffic data from files: {e}")
+            return None
     
     def _render_map_settings(self) -> None:
         """
@@ -493,6 +530,13 @@ class MapView:
             with col2:
                 # Simple independent options
                 show_city_labels = st.checkbox("🏷️ City Labels", value=True, key="show_city_labels")
+                
+                # Traffic data legend (always shown since traffic data is always loaded)
+                st.markdown("**🚦 Traffic V/C Ratio Legend:**")
+                st.markdown("🟢 Green: V/C < 0.5 (Low congestion)")
+                st.markdown("🟡 Yellow: 0.5 ≤ V/C < 0.8 (Moderate)")
+                st.markdown("🟠 Orange: 0.8 ≤ V/C < 1.0 (High)")
+                st.markdown("🔴 Red: V/C ≥ 1.0 (Over capacity)")
                 
 
                 

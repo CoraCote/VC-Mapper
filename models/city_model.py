@@ -249,15 +249,23 @@ class TrafficData:
         self.properties = feature_data.get('properties', {})
         self.geometry = feature_data.get('geometry', {})
         
-        # Extract common traffic properties
-        self.objectid = self.properties.get('OBJECTID')
+        # Extract common traffic properties based on actual data structure
+        self.objectid = self.properties.get('FID')
         self.roadway = self.properties.get('ROADWAY', '')
         self.county = self.properties.get('COUNTY', '')
-        self.year = self.properties.get('YEAR')
+        self.year = self.properties.get('YEAR_')
         self.aadt = self.properties.get('AADT', 0)  # Annual Average Daily Traffic
-        self.peak_hour = self.properties.get('PEAK_HOUR', '')
+        self.peak_hour = self.properties.get('KFCTR', 0)  # K-Factor (peak hour factor)
         self.district = self.properties.get('DISTRICT', '')
-        self.route = self.properties.get('ROUTE', '')
+        self.route = self.properties.get('DESC_TO', '')  # Route description
+        self.desc_from = self.properties.get('DESC_FRM', '')
+        self.desc_to = self.properties.get('DESC_TO', '')
+        self.cosite = self.properties.get('COSITE', '')
+        self.aadtflg = self.properties.get('AADTFLG', '')
+        self.countydot = self.properties.get('COUNTYDOT', '')
+        self.mng_dist = self.properties.get('MNG_DIST', '')
+        self.begin_post = self.properties.get('BEGIN_POST', 0)
+        self.end_post = self.properties.get('END_POST', 0)
         
     def to_dict(self) -> Dict:
         """Convert traffic data object back to dictionary"""
@@ -270,6 +278,14 @@ class TrafficData:
             'peak_hour': self.peak_hour,
             'district': self.district,
             'route': self.route,
+            'desc_from': self.desc_from,
+            'desc_to': self.desc_to,
+            'cosite': self.cosite,
+            'aadtflg': self.aadtflg,
+            'countydot': self.countydot,
+            'mng_dist': self.mng_dist,
+            'begin_post': self.begin_post,
+            'end_post': self.end_post,
             'geometry': self.geometry,
             'properties': self.properties
         }
@@ -332,7 +348,15 @@ class TrafficDataCollection:
                 'AADT': td.aadt,
                 'Peak Hour': td.peak_hour,
                 'District': td.district,
-                'Route': td.route
+                'Route': td.route,
+                'Description From': td.desc_from,
+                'Description To': td.desc_to,
+                'COSITE': td.cosite,
+                'AADT Flag': td.aadtflg,
+                'County DOT': td.countydot,
+                'Management District': td.mng_dist,
+                'Begin Post': td.begin_post,
+                'End Post': td.end_post
             })
         
         return pd.DataFrame(data)

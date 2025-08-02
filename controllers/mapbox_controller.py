@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Tuple, Any
 import logging
 import pydeck as pdk
 import pandas as pd
-from models.city_model import City, CityCollection
+from models.city_model import City, CityCollection, TrafficDataCollection
 from utils.florida_boundary_service import florida_boundary_service
 
 logger = logging.getLogger(__name__)
@@ -292,14 +292,16 @@ class MapboxController:
     def create_florida_map(self, cities: Optional[CityCollection] = None,
                           selected_city: Optional[City] = None,
                           show_only_selected: bool = False,
+                          traffic_data: Optional[Dict] = None,
                           map_style: str = 'mapbox://styles/mapbox/streets-v11') -> pdk.Deck:
         """
-        Create a complete Florida map with city layers
+        Create a complete Florida map with city and traffic layers
         
         Args:
             cities: Collection of cities to display
             selected_city: Currently selected city
             show_only_selected: Whether to show only selected city
+            traffic_data: Traffic data to display as roadway segments
             map_style: Mapbox map style
             
         Returns:
@@ -321,6 +323,12 @@ class MapboxController:
             boundary_layer = self.get_florida_boundary_layer()
             if boundary_layer:
                 layers.append(boundary_layer)
+            
+            # Add traffic roadway layer if provided
+            if traffic_data:
+                traffic_layer = self.get_traffic_roadway_layer(traffic_data)
+                if traffic_layer:
+                    layers.append(traffic_layer)
             
             # Add city markers if provided
             if cities:
@@ -382,6 +390,183 @@ class MapboxController:
         except Exception as e:
             logger.error(f"Error calculating map view: {e}")
             return self.florida_center['lat'], self.florida_center['lon'], 7
+
+    def get_traffic_roadway_layer(self, traffic_data: Dict) -> Optional[pdk.Layer]:
+        """
+        Create a layer for traffic roadway segments with V/C ratio color coding
+        
+        Args:
+            traffic_data: GeoJSON traffic data from API
+            
+        Returns:
+            PyDeck GeoJsonLayer for traffic roadways or None if error
+        """
+        try:
+            if not traffic_data or 'features' not in traffic_data:
+                logger.warning("No traffic data available for roadway layer")
+                return None
+            
+            # Create traffic collection to process data
+            traffic_collection = TrafficDataCollection(traffic_data)
+            
+            if len(traffic_collection) == 0:
+                logger.warning("No traffic features found in data")
+                return None
+            
+            # Calculate V/C ratios and prepare data for visualization
+            roadway_data = []
+            for traffic_record in traffic_collection:
+                # Calculate V/C ratio (Volume/Capacity)
+                # For this implementation, we'll use AADT as volume and estimate capacity
+                # V/C ratio = AADT / Estimated Capacity
+                aadt = traffic_record.aadt or 0
+                
+                # Estimate capacity based on typical roadway capacity
+                # This is a simplified estimation - in practice, you'd have actual capacity data
+                estimated_capacity = self._estimate_roadway_capacity(traffic_record)
+                vc_ratio = aadt / estimated_capacity if estimated_capacity > 0 else 0
+                
+                # Get color based on V/C ratio
+                color = self._get_vc_ratio_color(vc_ratio)
+                
+                # Prepare feature data
+                if traffic_record.geometry:
+                    roadway_data.append({
+                        'geometry': traffic_record.geometry,
+                        'properties': {
+                            'roadway': traffic_record.roadway,
+                            'county': traffic_record.county,
+                            'aadt': aadt,
+                            'vc_ratio': vc_ratio,
+                            'route': traffic_record.route,
+                            'desc_from': traffic_record.desc_from,
+                            'desc_to': traffic_record.desc_to,
+                            'district': traffic_record.district,
+                            'color': color
+                        }
+                    })
+            
+            if not roadway_data:
+                logger.warning("No valid roadway geometries found")
+                return None
+            
+            # Create GeoJSON for the layer
+            roadway_geojson = {
+                'type': 'FeatureCollection',
+                'features': roadway_data
+            }
+            
+            # Create the GeoJSON layer
+            layer = pdk.Layer(
+                "GeoJsonLayer",
+                data=roadway_geojson,
+                get_fill_color='properties.color',
+                get_line_color='properties.color',
+                get_line_width=3,
+                filled=False,
+                stroked=True,
+                pickable=True,
+                auto_highlight=True,
+                tooltip={
+                    "html": """
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                color: white; padding: 15px; border-radius: 10px; font-family: Arial;">
+                        <h3 style="margin: 0 0 10px 0;">Roadway {roadway}</h3>
+                        <p><strong>📍 County:</strong> {county}</p>
+                        <p><strong>🛣️ Route:</strong> {route}</p>
+                        <p><strong>📋 From:</strong> {desc_from}</p>
+                        <p><strong>📋 To:</strong> {desc_to}</p>
+                        <p><strong>🚗 AADT:</strong> {aadt:,}</p>
+                        <p><strong>📊 V/C Ratio:</strong> {vc_ratio:.2f}</p>
+                        <p><strong>🏢 District:</strong> {district}</p>
+                    </div>
+                    """,
+                    "style": {"backgroundColor": "transparent", "border": "none"}
+                }
+            )
+            
+            logger.info(f"Created traffic roadway layer with {len(roadway_data)} segments")
+            return layer
+            
+        except Exception as e:
+            logger.error(f"Error creating traffic roadway layer: {e}")
+            return None
+
+    def _estimate_roadway_capacity(self, traffic_record) -> float:
+        """
+        Estimate roadway capacity based on traffic record properties
+        
+        Args:
+            traffic_record: TrafficData object
+            
+        Returns:
+            Estimated capacity (vehicles per day)
+        """
+        try:
+            # Simplified capacity estimation based on typical roadway types
+            # In a real implementation, you'd have actual capacity data
+            
+            # Default capacity for unknown roadways
+            default_capacity = 20000  # vehicles per day
+            
+            # Estimate based on route description if available
+            route = traffic_record.route or ""
+            desc_to = traffic_record.desc_to or ""
+            roadway = traffic_record.roadway or ""
+            
+            # Interstate highways
+            if any(keyword in desc_to.upper() for keyword in ['I-', 'INTERSTATE', 'I95', 'I75', 'I4']):
+                return 80000
+            
+            # US highways
+            elif any(keyword in desc_to.upper() for keyword in ['US-', 'US ', 'US1', 'US27', 'US41']):
+                return 40000
+            
+            # State roads
+            elif any(keyword in desc_to.upper() for keyword in ['SR-', 'SR ', 'STATE', 'SR811', 'SR80']):
+                return 30000
+            
+            # County roads
+            elif any(keyword in desc_to.upper() for keyword in ['CR-', 'CR ', 'COUNTY']):
+                return 15000
+            
+            # Local roads
+            else:
+                return 10000
+                
+        except Exception as e:
+            logger.error(f"Error estimating roadway capacity: {e}")
+            return 20000  # Default fallback
+
+    def _get_vc_ratio_color(self, vc_ratio: float) -> List[int]:
+        """
+        Get color based on V/C ratio
+        
+        Args:
+            vc_ratio: Volume/Capacity ratio
+            
+        Returns:
+            RGBA color list
+        """
+        try:
+            # Color coding based on V/C ratio:
+            # Green: V/C < 0.5 (low congestion)
+            # Yellow: 0.5 <= V/C < 0.8 (moderate congestion)
+            # Orange: 0.8 <= V/C < 1.0 (high congestion)
+            # Red: V/C >= 1.0 (over capacity)
+            
+            if vc_ratio < 0.5:
+                return [0, 255, 0, 200]  # Green
+            elif vc_ratio < 0.8:
+                return [255, 255, 0, 200]  # Yellow
+            elif vc_ratio < 1.0:
+                return [255, 165, 0, 200]  # Orange
+            else:
+                return [255, 0, 0, 200]  # Red
+                
+        except Exception as e:
+            logger.error(f"Error getting V/C ratio color: {e}")
+            return [128, 128, 128, 200]  # Gray fallback
     
 
 

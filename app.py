@@ -165,13 +165,21 @@ class FDOTCityExplorer:
     def render_traffic_data_tab(self):
         """Render the traffic data tab"""
         try:
+            # Always try to get traffic data (from session or load fresh)
             traffic_data = st.session_state.get('traffic_data')
+            if not traffic_data:
+                # Try to load from files or fetch fresh
+                traffic_data = self.city_controller.fetch_traffic_data()
+                if traffic_data:
+                    self.city_controller.save_traffic_data_to_json(traffic_data)
+                    st.session_state.traffic_data = traffic_data
+            
             if traffic_data:
                 self.city_view.display_traffic_data(traffic_data)
             else:
-                st.info("🚦 No traffic data available. Enable 'Fetch traffic data' when fetching cities to load traffic information.")
+                st.info("🚦 Traffic data is being loaded automatically. If you don't see traffic data, please wait a moment or refresh the page.")
                 
-                # Provide option to fetch traffic data separately
+                # Provide option to fetch traffic data manually
                 if st.button("🚦 Fetch Traffic Data Now", type="primary"):
                     with st.spinner("🚦 Fetching traffic data..."):
                         traffic_data = self.city_controller.fetch_traffic_data()

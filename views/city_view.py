@@ -472,36 +472,33 @@ class CityView:
             if not traffic_df.empty:
                 # Traffic data filters
                 st.markdown("#### 🔍 Filter Traffic Data")
-                filter_col1, filter_col2 = st.columns(2)
                 
-                with filter_col1:
-                    counties = traffic_df['County'].dropna().unique().tolist()
-                    selected_county = st.selectbox(
-                        "Filter by County",
-                        ["All"] + sorted(counties),
-                        help="Select a county to filter traffic data"
-                    )
-                
-                with filter_col2:
-                    min_aadt = st.number_input(
-                        "Minimum AADT",
-                        min_value=0,
-                        max_value=int(traffic_df['AADT'].max()) if not traffic_df['AADT'].empty else 100000,
-                        value=0,
-                        step=1000,
-                        help="Filter roads with minimum Annual Average Daily Traffic"
-                    )
+                min_aadt = st.number_input(
+                    "Minimum AADT",
+                    min_value=0,
+                    max_value=int(traffic_df['AADT'].max()) if not traffic_df['AADT'].empty else 100000,
+                    value=0,
+                    step=1000,
+                    help="Filter roads with minimum Annual Average Daily Traffic"
+                )
                 
                 # Apply filters
                 filtered_df = traffic_df.copy()
-                if selected_county != "All":
-                    filtered_df = filtered_df[filtered_df['County'] == selected_county]
                 if min_aadt > 0:
                     filtered_df = filtered_df[filtered_df['AADT'] >= min_aadt]
                 
-                # Display filtered data
+                # Display filtered data with correct columns
                 st.markdown(f"#### 📊 Traffic Data Table ({len(filtered_df)} records)")
-                self._display_paginated_data_table(filtered_df, "traffic_data")
+                
+                # Select relevant columns for display
+                display_columns = ['Object ID', 'Roadway', 'County', 'Year', 'AADT', 'Peak Hour', 'District', 'Route', 'Description To']
+                available_columns = [col for col in display_columns if col in filtered_df.columns]
+                
+                if available_columns:
+                    display_df = filtered_df[available_columns]
+                    self._display_paginated_data_table(display_df, "traffic_data")
+                else:
+                    self._display_paginated_data_table(filtered_df, "traffic_data")
                 
                 # Traffic charts
                 if len(filtered_df) > 0:
@@ -568,7 +565,7 @@ class CityView:
             if not high_traffic.empty:
                 st.markdown("#### 🔥 Highest Traffic Roads")
                 st.dataframe(
-                    high_traffic[['Roadway', 'County', 'AADT', 'Route']],
+                    high_traffic[['Roadway', 'County', 'AADT', 'Route', 'Description To']],
                     use_container_width=True,
                     height=300
                 )
