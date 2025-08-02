@@ -426,7 +426,7 @@ class CityController:
 
     def _save_cities_to_json(self, cities: CityCollection) -> bool:
         """
-        Save cities data to a local JSON file
+        Save cities data to a local JSON file (overwrites existing file)
         
         Args:
             cities: CityCollection to save
@@ -444,9 +444,8 @@ class CityController:
             if not os.path.exists(data_dir):
                 os.makedirs(data_dir)
             
-            # Create filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{data_dir}/cities_data_{timestamp}.json"
+            # Use fixed filename (overwrites existing file)
+            filename = f"{data_dir}/cities_data.json"
             
             # Prepare data for JSON serialization
             cities_data = {
@@ -458,7 +457,7 @@ class CityController:
                 "cities": cities.get_cities_as_dict_list()
             }
             
-            # Save to JSON file
+            # Save to JSON file (overwrites if exists)
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(cities_data, f, indent=2, ensure_ascii=False)
             
@@ -506,7 +505,7 @@ class CityController:
 
     def save_traffic_data_to_json(self, traffic_data: Dict) -> bool:
         """
-        Save traffic data to a local JSON file
+        Save traffic data to a local JSON file (overwrites existing file)
         
         Args:
             traffic_data: Traffic data dictionary to save
@@ -524,9 +523,8 @@ class CityController:
             if not os.path.exists(data_dir):
                 os.makedirs(data_dir)
             
-            # Create filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{data_dir}/traffic_data_{timestamp}.json"
+            # Use fixed filename (overwrites existing file)
+            filename = f"{data_dir}/traffic_data.json"
             
             # Prepare data with metadata
             data_to_save = {
@@ -538,7 +536,7 @@ class CityController:
                 "traffic_data": traffic_data
             }
             
-            # Save to JSON file
+            # Save to JSON file (overwrites if exists)
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=2, ensure_ascii=False)
             
@@ -548,6 +546,70 @@ class CityController:
         except Exception as e:
             logger.error(f"Error saving traffic data to JSON: {e}")
             return False
+
+    def load_cities_from_json(self) -> Optional[CityCollection]:
+        """
+        Load cities data from saved JSON file (fixed filename)
+        
+        Returns:
+            CityCollection if successful, None otherwise
+        """
+        try:
+            import json
+            import os
+            
+            # Look for cities data file in the data directory
+            data_dir = "data"
+            cities_file = os.path.join(data_dir, "cities_data.json")
+            
+            if not os.path.exists(cities_file):
+                return None
+            
+            # Load cities data from fixed filename
+            with open(cities_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if 'cities' in data:
+                    cities_data = data['cities']
+                    city_collection = CityCollection(cities_data)
+                    logger.info(f"Loaded {len(city_collection)} cities from {cities_file}")
+                    return city_collection
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error loading cities from JSON: {e}")
+            return None
+
+    def load_traffic_data_from_json(self) -> Optional[Dict]:
+        """
+        Load traffic data from saved JSON file (fixed filename)
+        
+        Returns:
+            Traffic data dictionary if successful, None otherwise
+        """
+        try:
+            import json
+            import os
+            
+            # Look for traffic data file in the data directory
+            data_dir = "data"
+            traffic_file = os.path.join(data_dir, "traffic_data.json")
+            
+            if not os.path.exists(traffic_file):
+                return None
+            
+            # Load traffic data from fixed filename
+            with open(traffic_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if 'traffic_data' in data:
+                    logger.info(f"Loaded traffic data from {traffic_file}")
+                    return data['traffic_data']
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error loading traffic data from JSON: {e}")
+            return None
 
     
     def _search_cities_from_api(self, where_clause: str) -> List[Dict]:

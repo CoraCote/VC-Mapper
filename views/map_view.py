@@ -464,35 +464,27 @@ class MapView:
     
     def _load_traffic_data_from_files(self) -> Optional[Dict]:
         """
-        Load traffic data from saved JSON files
+        Load traffic data from saved JSON file (fixed filename)
         
         Returns:
-            Traffic data dictionary or None if no files found
+            Traffic data dictionary or None if no file found
         """
         try:
             import os
             import json
-            import glob
             
-            # Look for traffic data files in the data directory
+            # Look for traffic data file in the data directory
             data_dir = "data"
-            if not os.path.exists(data_dir):
+            traffic_file = os.path.join(data_dir, "traffic_data.json")
+            
+            if not os.path.exists(traffic_file):
                 return None
             
-            # Find the most recent traffic data file
-            traffic_files = glob.glob(os.path.join(data_dir, "traffic_data_*.json"))
-            if not traffic_files:
-                return None
-            
-            # Sort by modification time (most recent first)
-            traffic_files.sort(key=os.path.getmtime, reverse=True)
-            latest_file = traffic_files[0]
-            
-            # Load the most recent traffic data
-            with open(latest_file, 'r', encoding='utf-8') as f:
+            # Load traffic data from fixed filename
+            with open(traffic_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 if 'traffic_data' in data:
-                    logger.info(f"Loaded traffic data from {latest_file}")
+                    logger.info(f"Loaded traffic data from {traffic_file}")
                     return data['traffic_data']
             
             return None
