@@ -129,7 +129,7 @@ class MapboxController:
             logger.error(f"Error creating Florida boundary layer: {e}")
             return self._get_fallback_florida_boundary_layer()
     
-    def _get_fallback_florida_boundary_layer(self) -> pdk.Layer:
+    # def _get_fallback_florida_boundary_layer(self) -> pdk.Layer:
         """
         Create a fallback Florida boundary layer with static data
         
@@ -184,14 +184,14 @@ class MapboxController:
     def get_city_markers_layer(self, cities: CityCollection, 
                               selected_city: Optional[City] = None) -> Optional[pdk.Layer]:
         """
-        Create a layer for city markers
+        Create a layer for city markers using custom city icon
         
         Args:
             cities: Collection of cities to display
             selected_city: Currently selected city for highlighting
             
         Returns:
-            PyDeck ScatterplotLayer for city markers
+            PyDeck IconLayer for city markers
         """
         try:
             valid_cities = cities.get_valid_cities()
@@ -214,29 +214,41 @@ class MapboxController:
                     'color': color,
                     'size': size,
                     'geoid': city.geoid,
-                    'full_name': city.full_name
+                    'full_name': city.full_name,
+                    'icon': 'icon'  # Use the icon mapping defined in the layer
                 })
             
             # Convert to DataFrame for pydeck
             df = pd.DataFrame(city_data)
             
-            # Create scatterplot layer
+            # Create icon layer with custom city icon
             layer = pdk.Layer(
-                "ScatterplotLayer",
+                "IconLayer",
                 data=df,
                 get_position=['longitude', 'latitude'],
-                get_color='color',
-                get_radius='size',
-                radius_scale=1000,
-                radius_min_pixels=5,
-                radius_max_pixels=50,
+                get_icon='icon',
+                get_size='size',
+                size_scale=1,
+                size_min_pixels=20,
+                size_max_pixels=60,
+                icon_atlas="https://cdn-icons-png.flaticon.com/512/684/684908.png",
+                icon_mapping={
+                    'icon': {
+                        'x': 0,
+                        'y': 0,
+                        'width': 512,
+                        'height': 512,
+                        'anchorX': 256,
+                        'anchorY': 256
+                    }
+                },
                 pickable=True,
                 auto_highlight=True,
                 tooltip={
                     "html": """
                     <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                                 color: white; padding: 15px; border-radius: 10px; font-family: Arial;">
-                        <h3 style="margin: 0 0 10px 0;">{name}</h3>
+                        <h3 style="margin: 0 0 10px 0;">🏙️ {name}</h3>
                         <p><strong>📍 Full Name:</strong> {full_name}</p>
                         <p><strong>🆔 GEOID:</strong> {geoid}</p>
                         <p><strong>👥 Population:</strong> {population:,}</p>
@@ -246,7 +258,7 @@ class MapboxController:
                 }
             )
             
-            logger.info(f"Created city markers layer with {len(valid_cities)} cities")
+            logger.info(f"Created city markers layer with {len(valid_cities)} cities using custom icon")
             return layer
             
         except Exception as e:
@@ -269,23 +281,23 @@ class MapboxController:
             is_selected = selected_city and city.geoid == selected_city.geoid
             
             if is_selected:
-                return [255, 107, 53, 255], 25  # Orange, larger size
+                return [255, 107, 53, 255], 50  # Orange, larger size for selected city
             
-            # Color based on population
+            # Size based on population for icon layer
             population = city.population
             
             if population >= 100000:
-                return [255, 68, 68, 200], 20  # Red for metropolis
+                return [255, 68, 68, 200], 40  # Red for metropolis
             elif population >= 50000:
-                return [255, 136, 0, 200], 18   # Orange for large city
+                return [255, 136, 0, 200], 35   # Orange for large city
             elif population >= 10000:
-                return [68, 136, 255, 200], 15  # Blue for medium city
+                return [68, 136, 255, 200], 30  # Blue for medium city
             else:
-                return [68, 255, 68, 200], 12   # Green for small city
+                return [68, 255, 68, 200], 25   # Green for small city
                 
         except Exception as e:
             logger.error(f"Error getting city marker style: {e}")
-            return [128, 128, 128, 200], 10  # Gray fallback
+            return [128, 128, 128, 200], 20  # Gray fallback
     
 
     
