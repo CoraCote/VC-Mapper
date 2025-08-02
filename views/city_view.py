@@ -135,6 +135,9 @@ class CityView:
             # Convert to DataFrame for display
             df = cities.to_dataframe()
             
+            # Add export functionality
+            self._add_export_buttons(df, "City Data", "cities")
+            
             # Implement pagination for city data table
             self._display_paginated_data_table(df, "city_data")
             
@@ -490,6 +493,9 @@ class CityView:
                 # Display filtered data with correct columns
                 st.markdown(f"#### 📊 Traffic Data Table ({len(filtered_df)} records)")
                 
+                # Add export functionality for traffic data
+                self._add_export_buttons(filtered_df, "Traffic Data", "traffic")
+                
                 # Select relevant columns for display
                 display_columns = ['Object ID', 'Roadway', 'County', 'Year', 'AADT', 'Peak Hour', 'District', 'Route', 'Description To']
                 available_columns = [col for col in display_columns if col in filtered_df.columns]
@@ -507,6 +513,103 @@ class CityView:
         except Exception as e:
             logger.error(f"Error displaying traffic data: {e}")
             st.error("❌ Error displaying traffic data")
+    
+    def _add_export_buttons(self, df: pd.DataFrame, data_type: str, data_key: str) -> None:
+        """
+        Add export buttons for CSV and Excel download
+        
+        Args:
+            df: DataFrame to export
+            data_type: Type of data (e.g., "City Data", "Traffic Data")
+            data_key: Key for unique file naming
+        """
+        try:
+            if df.empty:
+                return
+            
+            st.markdown("#### 💾 Export Data")
+            
+            # Create export buttons in columns
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # CSV Export
+                csv_data = df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download CSV",
+                    data=csv_data,
+                    file_name=f"{data_key}_data_{len(df)}_records.csv",
+                    mime="text/csv",
+                    help=f"Download {data_type} as CSV file",
+                    use_container_width=True
+                )
+            
+            with col2:
+                # Excel Export
+                try:
+                    import io
+                    from openpyxl import Workbook
+                    from openpyxl.utils.dataframe import dataframe_to_rows
+                    
+                    # Create Excel workbook
+                    wb = Workbook()
+                    ws = wb.active
+                    ws.title = f"{data_type}"
+                    
+                    # Add data to worksheet
+                    for r in dataframe_to_rows(df, index=False, header=True):
+                        ws.append(r)
+                    
+                    # Auto-adjust column widths
+                    for column in ws.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        adjusted_width = min(max_length + 2, 50)
+                        ws.column_dimensions[column_letter].width = adjusted_width
+                    
+                    # Save to bytes
+                    excel_buffer = io.BytesIO()
+                    wb.save(excel_buffer)
+                    excel_data = excel_buffer.getvalue()
+                    
+                    st.download_button(
+                        label="📊 Download Excel",
+                        data=excel_data,
+                        file_name=f"{data_key}_data_{len(df)}_records.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        help=f"Download {data_type} as Excel file",
+                        use_container_width=True
+                    )
+                    
+                except ImportError:
+                    st.warning("⚠️ Excel export requires openpyxl. Install with: pip install openpyxl")
+                except Exception as e:
+                    logger.error(f"Error creating Excel export: {e}")
+                    st.error("❌ Excel export failed")
+            
+            with col3:
+                # JSON Export
+                json_data = df.to_json(orient='records', indent=2)
+                st.download_button(
+                    label="📋 Download JSON",
+                    data=json_data,
+                    file_name=f"{data_key}_data_{len(df)}_records.json",
+                    mime="application/json",
+                    help=f"Download {data_type} as JSON file",
+                    use_container_width=True
+                )
+            
+            st.success(f"✅ {data_type} export options available for {len(df)} records!")
+            
+        except Exception as e:
+            logger.error(f"Error adding export buttons: {e}")
+            st.error("❌ Export functionality failed")
     
     def _create_traffic_charts(self, traffic_df: pd.DataFrame) -> None:
         """
